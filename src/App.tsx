@@ -196,7 +196,7 @@ function generateAITips(debts: Debt[], expenses: Expense[], extraPayment: number
   // Quick wins based on debt amounts
   const smallDebts = debts.filter(d => d.balance < 5000 && d.balance > 0);
   if (smallDebts.length > 0) {
-    const smallest = smallDebts.sort((a, b) => a.balance - b.balance)[0];
+    const smallest = [...smallDebts].sort((a, b) => a.balance - b.balance)[0];
     const monthsToPayoff = Math.ceil(smallest.balance / (smallest.minPayment + extraPayment));
     tips.push({
       type: 'opportunity',
@@ -569,7 +569,7 @@ export default function DebtTracker() {
                     </button>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                    {debts.sort((a, b) => a.priority - b.priority).slice(0, 5).map((debt) => (
+                    {[...debts].sort((a, b) => a.priority - b.priority).slice(0, 5).map((debt) => (
                       <div key={debt.id}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -627,7 +627,7 @@ export default function DebtTracker() {
                     <p style={{ fontSize: '12px', color: '#525252', marginTop: '4px', marginBottom: 0 }}>Total Monthly</p>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '144px', overflowY: 'auto' }}>
-                    {expensesByCategory.sort((a, b) => b.value - a.value).map((cat) => (
+                    {[...expensesByCategory].sort((a, b) => b.value - a.value).map((cat) => (
                       <div key={cat.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '14px', padding: '4px 0' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: cat.color }} />
@@ -704,7 +704,7 @@ export default function DebtTracker() {
               )}
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {debts.sort((a, b) => a.priority - b.priority).map((debt) => (
+                {[...debts].sort((a, b) => a.priority - b.priority).map((debt) => (
                   <div key={debt.id} style={{ backgroundColor: '#0a0a0a', borderRadius: '16px', padding: '24px', border: '1px solid #171717' }}>
                     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
@@ -833,7 +833,7 @@ export default function DebtTracker() {
                 <h3 style={{ fontWeight: '600', color: '#fafafa', marginBottom: '16px', marginTop: 0 }}>Spending by Category</h3>
                 <div style={{ height: '256px' }}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={expensesByCategory.sort((a, b) => b.value - a.value)} layout="vertical">
+                    <BarChart data={[...expensesByCategory].sort((a, b) => b.value - a.value)} layout="vertical">
                       <CartesianGrid strokeDasharray="3 3" stroke="#262626" horizontal={false} />
                       <XAxis type="number" tickFormatter={(v) => `$${v}`} stroke="#404040" axisLine={false} tickLine={false} />
                       <YAxis type="category" dataKey="name" stroke="#525252" width={100} axisLine={false} tickLine={false} />
