@@ -1,8 +1,162 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
-import { TrendingDown, TrendingUp, DollarSign, CreditCard, Lightbulb, Target, Calendar, Plus, ChevronRight, CheckCircle2, AlertCircle, Sparkles, X, Trash2, LayoutDashboard, Receipt, Map, Brain, Settings, Edit3, Save } from 'lucide-react';
+import { TrendingDown, TrendingUp, DollarSign, CreditCard, Lightbulb, Target, Calendar, Plus, ChevronRight, CheckCircle2, AlertCircle, Sparkles, X, Trash2, LayoutDashboard, Receipt, Map, Brain, Settings, Edit3, Save, History, PartyPopper } from 'lucide-react';
+
+// ============ ANIMATED NUMBER COMPONENT ============
+function AnimatedNumber({ value, duration = 500, prefix = '', suffix = '' }: { value: number; duration?: number; prefix?: string; suffix?: string }) {
+  const [displayValue, setDisplayValue] = useState(value);
+  const previousValue = useRef(value);
+
+  useEffect(() => {
+    const startValue = previousValue.current;
+    const endValue = value;
+    const startTime = Date.now();
+
+    const animate = () => {
+      const now = Date.now();
+      const progress = Math.min((now - startTime) / duration, 1);
+      const easeOut = 1 - Math.pow(1 - progress, 3);
+      const current = startValue + (endValue - startValue) * easeOut;
+
+      setDisplayValue(current);
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        previousValue.current = endValue;
+      }
+    };
+
+    requestAnimationFrame(animate);
+  }, [value, duration]);
+
+  return <>{prefix}{Math.round(displayValue).toLocaleString()}{suffix}</>;
+}
+
+// ============ CONFETTI COMPONENT ============
+function Confetti({ active, onComplete }: { active: boolean; onComplete: () => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (!active || !canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const particles: Array<{
+      x: number; y: number; vx: number; vy: number;
+      color: string; size: number; rotation: number; rotationSpeed: number;
+    }> = [];
+
+    const colors = ['#10b981', '#06b6d4', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899'];
+
+    // Create particles
+    for (let i = 0; i < 150; i++) {
+      particles.push({
+        x: Math.random() * canvas.width,
+        y: -20 - Math.random() * 100,
+        vx: (Math.random() - 0.5) * 8,
+        vy: Math.random() * 3 + 2,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        size: Math.random() * 8 + 4,
+        rotation: Math.random() * 360,
+        rotationSpeed: (Math.random() - 0.5) * 10
+      });
+    }
+
+    let animationId: number;
+    let frame = 0;
+
+    const animate = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      particles.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.1; // gravity
+        p.rotation += p.rotationSpeed;
+
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate((p.rotation * Math.PI) / 180);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+        ctx.restore();
+      });
+
+      frame++;
+      if (frame < 180) {
+        animationId = requestAnimationFrame(animate);
+      } else {
+        onComplete();
+      }
+    };
+
+    animate();
+
+    return () => cancelAnimationFrame(animationId);
+  }, [active, onComplete]);
+
+  if (!active) return null;
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'none',
+        zIndex: 9999
+      }}
+    />
+  );
+}
+
+// ============ TOAST NOTIFICATION ============
+function Toast({ message, visible, type = 'success' }: { message: string; visible: boolean; type?: 'success' | 'info' }) {
+  return (
+    <div style={{
+      position: 'fixed',
+      bottom: '24px',
+      right: '24px',
+      padding: '12px 20px',
+      backgroundColor: type === 'success' ? '#10b981' : '#3b82f6',
+      color: '#ffffff',
+      borderRadius: '12px',
+      fontSize: '14px',
+      fontWeight: '500',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+      transform: visible ? 'translateY(0)' : 'translateY(100px)',
+      opacity: visible ? 1 : 0,
+      transition: 'all 0.3s ease',
+      zIndex: 1000,
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px'
+    }}>
+      <CheckCircle2 style={{ width: '16px', height: '16px' }} />
+      {message}
+    </div>
+  );
+}
 
 // Types
+interface Payment {
+  id: number;
+  debtId: number;
+  debtName: string;
+  amount: number;
+  date: string;
+  note?: string;
+}
+
 interface Debt {
   id: number;
   name: string;
@@ -214,18 +368,47 @@ export default function DebtTracker() {
   const [debts, setDebts] = useState<Debt[]>(() => loadFromStorage('debts', defaultDebts));
   const [expenses, setExpenses] = useState<Expense[]>(() => loadFromStorage('expenses', defaultExpenses));
   const [extraPayment, setExtraPayment] = useState<number>(() => loadFromStorage('extraPayment', 500));
+  const [payments, setPayments] = useState<Payment[]>(() => loadFromStorage('payments', []));
   const [showAddDebt, setShowAddDebt] = useState(false);
   const [showAddExpense, setShowAddExpense] = useState(false);
+  const [showAddPayment, setShowAddPayment] = useState(false);
+  const [showPaymentHistory, setShowPaymentHistory] = useState(false);
   const [newDebt, setNewDebt] = useState({ name: '', balance: '', rate: '', minPayment: '' });
   const [newExpense, setNewExpense] = useState({ name: '', amount: '', category: 'Personal' });
+  const [newPayment, setNewPayment] = useState({ debtId: '', amount: '', note: '' });
   const [editingDebt, setEditingDebt] = useState<number | null>(null);
   const [editBalance, setEditBalance] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' as 'success' | 'info' });
+  const [milestoneReached, setMilestoneReached] = useState<string | null>(null);
+
+  // Show toast helper
+  const showToast = useCallback((message: string, type: 'success' | 'info' = 'success') => {
+    setToast({ visible: true, message, type });
+    setTimeout(() => setToast(t => ({ ...t, visible: false })), 3000);
+  }, []);
+
+  // Check for milestones
+  const checkMilestones = useCallback((oldTotal: number, newTotal: number, originalTotal: number) => {
+    const oldPercent = Math.floor((1 - oldTotal / originalTotal) * 100);
+    const newPercent = Math.floor((1 - newTotal / originalTotal) * 100);
+
+    const milestones = [25, 50, 75, 100];
+    for (const milestone of milestones) {
+      if (oldPercent < milestone && newPercent >= milestone) {
+        setMilestoneReached(`${milestone}% of debt eliminated!`);
+        setShowConfetti(true);
+        return;
+      }
+    }
+  }, []);
 
   // Save to localStorage when data changes
   useEffect(() => { saveToStorage('debts', debts); }, [debts]);
   useEffect(() => { saveToStorage('expenses', expenses); }, [expenses]);
   useEffect(() => { saveToStorage('extraPayment', extraPayment); }, [extraPayment]);
+  useEffect(() => { saveToStorage('payments', payments); }, [payments]);
 
   const totalDebt = useMemo(() => debts.reduce((sum, d) => sum + d.balance, 0), [debts]);
   const totalMinPayments = useMemo(() => debts.reduce((sum, d) => sum + d.minPayment, 0), [debts]);
@@ -322,11 +505,86 @@ export default function DebtTracker() {
     }
   };
 
+  const handleAddPayment = () => {
+    if (newPayment.debtId && newPayment.amount) {
+      const debtId = parseInt(newPayment.debtId);
+      const amount = parseFloat(newPayment.amount);
+      const debt = debts.find(d => d.id === debtId);
+
+      if (debt) {
+        const oldTotal = totalDebt;
+        const newBalance = Math.max(0, debt.balance - amount);
+        const originalTotal = debts.reduce((sum, d) => sum + d.originalBalance, 0);
+
+        // Add payment record
+        setPayments([...payments, {
+          id: Date.now(),
+          debtId,
+          debtName: debt.name,
+          amount,
+          date: new Date().toISOString(),
+          note: newPayment.note || undefined
+        }]);
+
+        // Update debt balance
+        setDebts(debts.map(d =>
+          d.id === debtId ? { ...d, balance: newBalance } : d
+        ));
+
+        // Check if debt is paid off
+        if (newBalance === 0 && debt.balance > 0) {
+          setMilestoneReached(`${debt.name} is PAID OFF!`);
+          setShowConfetti(true);
+        } else {
+          // Check for percentage milestones
+          const newTotal = oldTotal - amount;
+          checkMilestones(oldTotal, newTotal, originalTotal);
+        }
+
+        showToast(`Payment of $${amount.toLocaleString()} recorded!`);
+        setNewPayment({ debtId: '', amount: '', note: '' });
+        setShowAddPayment(false);
+      }
+    }
+  };
+
   const handleUpdateBalance = (debtId: number) => {
     if (editBalance) {
-      setDebts(debts.map(d =>
-        d.id === debtId ? { ...d, balance: parseFloat(editBalance) } : d
-      ));
+      const debt = debts.find(d => d.id === debtId);
+      const newBalance = parseFloat(editBalance);
+
+      if (debt) {
+        const oldTotal = totalDebt;
+        const originalTotal = debts.reduce((sum, d) => sum + d.originalBalance, 0);
+        const paymentAmount = debt.balance - newBalance;
+
+        // Log as a payment if balance decreased
+        if (paymentAmount > 0) {
+          setPayments([...payments, {
+            id: Date.now(),
+            debtId,
+            debtName: debt.name,
+            amount: paymentAmount,
+            date: new Date().toISOString(),
+            note: 'Balance update'
+          }]);
+
+          // Check if debt is paid off
+          if (newBalance === 0 && debt.balance > 0) {
+            setMilestoneReached(`${debt.name} is PAID OFF!`);
+            setShowConfetti(true);
+          } else {
+            const newTotal = debts.reduce((sum, d) => sum + (d.id === debtId ? newBalance : d.balance), 0);
+            checkMilestones(oldTotal, newTotal, originalTotal);
+          }
+
+          showToast(`Balance updated! $${paymentAmount.toLocaleString()} payment recorded.`);
+        }
+
+        setDebts(debts.map(d =>
+          d.id === debtId ? { ...d, balance: newBalance } : d
+        ));
+      }
     }
     setEditingDebt(null);
     setEditBalance('');
@@ -341,6 +599,146 @@ export default function DebtTracker() {
 
   return (
     <div className="flex min-h-screen" style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif', backgroundColor: '#000000', color: '#e5e5e5' }}>
+      {/* Confetti Effect */}
+      <Confetti active={showConfetti} onComplete={() => setShowConfetti(false)} />
+
+      {/* Toast Notification */}
+      <Toast message={toast.message} visible={toast.visible} type={toast.type} />
+
+      {/* Milestone Modal */}
+      {milestoneReached && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }} onClick={() => setMilestoneReached(null)}>
+          <div style={{
+            backgroundColor: '#0a0a0a',
+            borderRadius: '24px',
+            padding: '48px',
+            textAlign: 'center',
+            border: '1px solid #262626',
+            maxWidth: '400px',
+            animation: 'scaleIn 0.3s ease'
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{
+              width: '80px',
+              height: '80px',
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #10b981, #06b6d4)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 24px',
+              boxShadow: '0 8px 32px rgba(16, 185, 129, 0.4)'
+            }}>
+              <PartyPopper style={{ width: '40px', height: '40px', color: '#ffffff' }} />
+            </div>
+            <h2 style={{ fontSize: '28px', fontWeight: '700', color: '#fafafa', margin: '0 0 12px' }}>
+              Congratulations!
+            </h2>
+            <p style={{ fontSize: '18px', color: '#10b981', fontWeight: '600', margin: '0 0 24px' }}>
+              {milestoneReached}
+            </p>
+            <p style={{ fontSize: '14px', color: '#737373', margin: '0 0 24px' }}>
+              Keep up the amazing work! You're making incredible progress on your debt-free journey.
+            </p>
+            <button
+              onClick={() => setMilestoneReached(null)}
+              style={{
+                padding: '12px 32px',
+                background: 'linear-gradient(90deg, #059669, #10b981)',
+                borderRadius: '12px',
+                border: 'none',
+                color: '#ffffff',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: 'pointer'
+              }}
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Payment History Modal */}
+      {showPaymentHistory && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: '20px'
+        }} onClick={() => setShowPaymentHistory(false)}>
+          <div style={{
+            backgroundColor: '#0a0a0a',
+            borderRadius: '16px',
+            padding: '24px',
+            width: '100%',
+            maxWidth: '500px',
+            maxHeight: '80vh',
+            overflow: 'auto',
+            border: '1px solid #262626'
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#fafafa', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <History style={{ width: '20px', height: '20px', color: '#10b981' }} />
+                Payment History
+              </h3>
+              <button onClick={() => setShowPaymentHistory(false)} style={{ background: 'none', border: 'none', color: '#525252', cursor: 'pointer' }}>
+                <X style={{ width: '20px', height: '20px' }} />
+              </button>
+            </div>
+            {payments.length === 0 ? (
+              <p style={{ color: '#525252', textAlign: 'center', padding: '40px 0' }}>No payments recorded yet</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {[...payments].reverse().map(payment => (
+                  <div key={payment.id} style={{
+                    backgroundColor: '#141414',
+                    borderRadius: '12px',
+                    padding: '16px',
+                    border: '1px solid #262626'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <p style={{ fontWeight: '500', color: '#fafafa', margin: '0 0 4px' }}>{payment.debtName}</p>
+                        <p style={{ fontSize: '12px', color: '#525252', margin: 0 }}>
+                          {new Date(payment.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </p>
+                        {payment.note && <p style={{ fontSize: '12px', color: '#737373', margin: '4px 0 0', fontStyle: 'italic' }}>{payment.note}</p>}
+                      </div>
+                      <p style={{ fontFamily: 'ui-monospace, monospace', fontWeight: '600', color: '#10b981', margin: 0 }}>
+                        ${payment.amount.toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid #262626' }}>
+              <p style={{ fontSize: '14px', color: '#737373', margin: 0 }}>
+                Total Paid: <span style={{ color: '#10b981', fontWeight: '600' }}>${payments.reduce((sum, p) => sum + p.amount, 0).toLocaleString()}</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Mobile Menu Button */}
       <button
         onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -502,6 +900,91 @@ export default function DebtTracker() {
           {/* Dashboard Tab */}
           {activeTab === 'dashboard' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              {/* Quick Actions */}
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => setShowAddPayment(true)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '10px 20px',
+                    background: 'linear-gradient(90deg, #059669, #10b981)',
+                    borderRadius: '12px',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    border: 'none',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+                  }}
+                >
+                  <Plus style={{ width: '16px', height: '16px' }} /> Log Payment
+                </button>
+                <button
+                  onClick={() => setShowPaymentHistory(true)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '10px 20px',
+                    backgroundColor: '#141414',
+                    borderRadius: '12px',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    border: '1px solid #262626',
+                    color: '#a3a3a3',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <History style={{ width: '16px', height: '16px' }} /> Payment History ({payments.length})
+                </button>
+              </div>
+
+              {/* Add Payment Modal */}
+              {showAddPayment && (
+                <div style={{ backgroundColor: '#0a0a0a', borderRadius: '16px', padding: '24px', border: '1px solid #10b981' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                    <h3 style={{ fontWeight: '600', color: '#fafafa', margin: 0 }}>Log a Payment</h3>
+                    <button onClick={() => setShowAddPayment(false)} style={{ color: '#525252', background: 'none', border: 'none', cursor: 'pointer' }}>
+                      <X style={{ width: '20px', height: '20px' }} />
+                    </button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px' }}>
+                    <select
+                      value={newPayment.debtId}
+                      onChange={(e) => setNewPayment({...newPayment, debtId: e.target.value})}
+                      style={{ backgroundColor: '#141414', border: '1px solid #262626', borderRadius: '12px', padding: '12px 16px', fontSize: '14px', color: '#fafafa', outline: 'none' }}
+                    >
+                      <option value="">Select Debt</option>
+                      {debts.filter(d => d.balance > 0).map(debt => (
+                        <option key={debt.id} value={debt.id}>{debt.name} (${debt.balance.toLocaleString()})</option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      placeholder="Payment Amount"
+                      value={newPayment.amount}
+                      onChange={(e) => setNewPayment({...newPayment, amount: e.target.value})}
+                      style={{ backgroundColor: '#141414', border: '1px solid #262626', borderRadius: '12px', padding: '12px 16px', fontSize: '14px', color: '#fafafa', outline: 'none' }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Note (optional)"
+                      value={newPayment.note}
+                      onChange={(e) => setNewPayment({...newPayment, note: e.target.value})}
+                      style={{ backgroundColor: '#141414', border: '1px solid #262626', borderRadius: '12px', padding: '12px 16px', fontSize: '14px', color: '#fafafa', outline: 'none' }}
+                    />
+                  </div>
+                  <button
+                    onClick={handleAddPayment}
+                    style={{ marginTop: '16px', width: '100%', padding: '12px', background: 'linear-gradient(90deg, #059669, #10b981)', borderRadius: '12px', fontSize: '14px', fontWeight: '500', border: 'none', color: '#ffffff', cursor: 'pointer' }}
+                  >
+                    Record Payment
+                  </button>
+                </div>
+              )}
+
               {/* Stats Cards */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
                 <div style={{ backgroundColor: '#0a0a0a', borderRadius: '16px', padding: '20px', border: '1px solid #171717' }}>
@@ -512,9 +995,9 @@ export default function DebtTracker() {
                     <span style={{ fontSize: '12px', color: '#525252', backgroundColor: '#141414', padding: '4px 8px', borderRadius: '8px' }}>Total</span>
                   </div>
                   <p style={{ fontSize: '28px', fontWeight: '700', color: '#fafafa', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
-                    {formatCurrency(totalDebt)}
+                    $<AnimatedNumber value={totalDebt} />
                   </p>
-                  <p style={{ fontSize: '12px', color: '#525252', marginTop: '4px', marginBottom: 0 }}>{debts.length} active accounts</p>
+                  <p style={{ fontSize: '12px', color: '#525252', marginTop: '4px', marginBottom: 0 }}>{debts.filter(d => d.balance > 0).length} active accounts</p>
                 </div>
 
                 <div style={{ backgroundColor: '#0a0a0a', borderRadius: '16px', padding: '20px', border: '1px solid #171717' }}>
@@ -525,7 +1008,7 @@ export default function DebtTracker() {
                     <span style={{ fontSize: '12px', color: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.1)', padding: '4px 8px', borderRadius: '8px' }}>+${extraPayment} extra</span>
                   </div>
                   <p style={{ fontSize: '28px', fontWeight: '700', color: '#fafafa', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
-                    {formatCurrency(totalMinPayments + extraPayment)}
+                    $<AnimatedNumber value={totalMinPayments + extraPayment} />
                   </p>
                   <p style={{ fontSize: '12px', color: '#525252', marginTop: '4px', marginBottom: 0 }}>Monthly payments</p>
                 </div>
@@ -538,7 +1021,7 @@ export default function DebtTracker() {
                     <span style={{ fontSize: '12px', color: '#f97316', backgroundColor: 'rgba(249, 115, 22, 0.1)', padding: '4px 8px', borderRadius: '8px' }}>Interest</span>
                   </div>
                   <p style={{ fontSize: '28px', fontWeight: '700', color: '#fafafa', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
-                    {formatCurrency(monthlyInterest)}
+                    $<AnimatedNumber value={Math.round(monthlyInterest)} />
                   </p>
                   <p style={{ fontSize: '12px', color: '#525252', marginTop: '4px', marginBottom: 0 }}>Lost monthly to interest</p>
                 </div>
@@ -548,10 +1031,12 @@ export default function DebtTracker() {
                     <div style={{ width: '40px', height: '40px', borderRadius: '12px', backgroundColor: 'rgba(6, 182, 212, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <Target style={{ width: '20px', height: '20px', color: '#06b6d4' }} />
                     </div>
-                    <span style={{ fontSize: '12px', color: '#06b6d4', backgroundColor: 'rgba(6, 182, 212, 0.1)', padding: '4px 8px', borderRadius: '8px' }}>Goal</span>
+                    <span style={{ fontSize: '12px', color: '#06b6d4', backgroundColor: 'rgba(6, 182, 212, 0.1)', padding: '4px 8px', borderRadius: '8px' }}>Paid</span>
                   </div>
-                  <p style={{ fontSize: '28px', fontWeight: '700', color: '#fafafa', margin: 0 }}>Oct 2036</p>
-                  <p style={{ fontSize: '12px', color: '#525252', marginTop: '4px', marginBottom: 0 }}>Debt-free target</p>
+                  <p style={{ fontSize: '28px', fontWeight: '700', color: '#10b981', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                    $<AnimatedNumber value={payments.reduce((sum, p) => sum + p.amount, 0)} />
+                  </p>
+                  <p style={{ fontSize: '12px', color: '#525252', marginTop: '4px', marginBottom: 0 }}>Total payments logged</p>
                 </div>
               </div>
 
@@ -1068,6 +1553,10 @@ export default function DebtTracker() {
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
+        }
+        @keyframes scaleIn {
+          from { transform: scale(0.9); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
         }
       `}</style>
     </div>
