@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
-import { TrendingDown, TrendingUp, DollarSign, CreditCard, Lightbulb, Target, Calendar, Plus, ChevronRight, CheckCircle2, AlertCircle, Sparkles, X, Trash2, LayoutDashboard, Receipt, Map, Brain, Settings, Edit3, Save, History, PartyPopper } from 'lucide-react';
+import { TrendingDown, TrendingUp, DollarSign, CreditCard, Lightbulb, Target, Calendar, Plus, ChevronRight, CheckCircle2, AlertCircle, Sparkles, X, Trash2, LayoutDashboard, Receipt, Map, Brain, Settings, Edit3, Save, History, PartyPopper, Cloud, CloudOff } from 'lucide-react';
 
 // ============ ANIMATED NUMBER COMPONENT ============
 function AnimatedNumber({ value, duration = 500, prefix = '', suffix = '' }: { value: number; duration?: number; prefix?: string; suffix?: string }) {
@@ -235,6 +235,12 @@ const navItems = [
   { id: 'insights', label: 'AI Insights', icon: Brain },
 ];
 
+// Import Firebase helpers
+import { isFirebaseConfigured, saveToFirestore, subscribeToFirestore } from './firebase';
+
+// Unique family ID - change this to create separate "accounts"
+const FAMILY_ID = 'bones-family';
+
 // Helper to load from localStorage
 function loadFromStorage<T>(key: string, defaultValue: T): T {
   try {
@@ -245,12 +251,16 @@ function loadFromStorage<T>(key: string, defaultValue: T): T {
   }
 }
 
-// Helper to save to localStorage
+// Helper to save to localStorage (and Firestore if configured)
 function saveToStorage<T>(key: string, value: T): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
+    // Also save to Firestore if configured
+    if (isFirebaseConfigured()) {
+      saveToFirestore('budgets', `${FAMILY_ID}-${key}`, value);
+    }
   } catch (e) {
-    console.error('Failed to save to localStorage:', e);
+    console.error('Failed to save:', e);
   }
 }
 
@@ -409,6 +419,31 @@ export default function DebtTracker() {
   useEffect(() => { saveToStorage('expenses', expenses); }, [expenses]);
   useEffect(() => { saveToStorage('extraPayment', extraPayment); }, [extraPayment]);
   useEffect(() => { saveToStorage('payments', payments); }, [payments]);
+
+  // Subscribe to Firestore updates for real-time sync
+  useEffect(() => {
+    if (!isFirebaseConfigured()) return;
+
+    const unsubDebts = subscribeToFirestore<Debt[]>('budgets', `${FAMILY_ID}-debts`, (data) => {
+      if (data) setDebts(data);
+    });
+    const unsubExpenses = subscribeToFirestore<Expense[]>('budgets', `${FAMILY_ID}-expenses`, (data) => {
+      if (data) setExpenses(data);
+    });
+    const unsubExtra = subscribeToFirestore<number>('budgets', `${FAMILY_ID}-extraPayment`, (data) => {
+      if (data !== null) setExtraPayment(data);
+    });
+    const unsubPayments = subscribeToFirestore<Payment[]>('budgets', `${FAMILY_ID}-payments`, (data) => {
+      if (data) setPayments(data);
+    });
+
+    return () => {
+      unsubDebts();
+      unsubExpenses();
+      unsubExtra();
+      unsubPayments();
+    };
+  }, []);
 
   const totalDebt = useMemo(() => debts.reduce((sum, d) => sum + d.balance, 0), [debts]);
   const totalMinPayments = useMemo(() => debts.reduce((sum, d) => sum + d.minPayment, 0), [debts]);
@@ -862,7 +897,15 @@ export default function DebtTracker() {
             </p>
           </div>
           <p style={{ fontSize: '10px', color: '#404040', textAlign: 'center', margin: 0 }}>
-            Data saved locally on your device
+{isFirebaseConfigured() ? (
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981' }}>
+                <Cloud style={{ width: '12px', height: '12px' }} /> Synced to cloud
+              </span>
+            ) : (
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <CloudOff style={{ width: '12px', height: '12px' }} /> Local storage only
+              </span>
+            )}
           </p>
         </div>
       </aside>
