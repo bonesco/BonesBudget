@@ -1,7 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import { TrendingDown, TrendingUp, DollarSign, CreditCard, Lightbulb, Target, Calendar, Plus, ChevronRight, CheckCircle2, AlertCircle, Sparkles, X, Trash2, LayoutDashboard, Receipt, Map, Brain, Settings, Edit3, Save, History, PartyPopper, Cloud, CloudOff, FileText, Download, Calculator, ArrowDownRight } from 'lucide-react';
-import jsPDF from 'jspdf';
 
 // ============ ANIMATED NUMBER COMPONENT ============
 function AnimatedNumber({ value, duration = 500, prefix = '', suffix = '' }: { value: number; duration?: number; prefix?: string; suffix?: string }) {
@@ -571,6 +570,8 @@ export default function DebtTracker() {
 
   // PDF Export function
   const exportToPDF = useCallback(async () => {
+    const jsPDFModule = await import('jspdf');
+    const jsPDF = jsPDFModule.default;
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pageWidth = pdf.internal.pageSize.getWidth();
 
