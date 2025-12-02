@@ -1,8 +1,162 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
-import { TrendingDown, TrendingUp, DollarSign, CreditCard, Lightbulb, Target, Calendar, Plus, ChevronRight, CheckCircle2, AlertCircle, Sparkles, X, Trash2, LayoutDashboard, Receipt, Map, Brain, Settings, Edit3, Save } from 'lucide-react';
+import { TrendingDown, TrendingUp, DollarSign, CreditCard, Lightbulb, Target, Calendar, Plus, ChevronRight, CheckCircle2, AlertCircle, Sparkles, X, Trash2, LayoutDashboard, Receipt, Map, Brain, Settings, Edit3, Save, History, PartyPopper, Cloud, CloudOff, FileText, Download, Calculator, ArrowDownRight } from 'lucide-react';
+
+// ============ ANIMATED NUMBER COMPONENT ============
+function AnimatedNumber({ value, duration = 500, prefix = '', suffix = '' }: { value: number; duration?: number; prefix?: string; suffix?: string }) {
+  const [displayValue, setDisplayValue] = useState(value);
+  const previousValue = useRef(value);
+
+  useEffect(() => {
+    const startValue = previousValue.current;
+    const endValue = value;
+    const startTime = Date.now();
+
+    const animate = () => {
+      const now = Date.now();
+      const progress = Math.min((now - startTime) / duration, 1);
+      const easeOut = 1 - Math.pow(1 - progress, 3);
+      const current = startValue + (endValue - startValue) * easeOut;
+
+      setDisplayValue(current);
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        previousValue.current = endValue;
+      }
+    };
+
+    requestAnimationFrame(animate);
+  }, [value, duration]);
+
+  return <>{prefix}{Math.round(displayValue).toLocaleString()}{suffix}</>;
+}
+
+// ============ CONFETTI COMPONENT ============
+function Confetti({ active, onComplete }: { active: boolean; onComplete: () => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (!active || !canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const particles: Array<{
+      x: number; y: number; vx: number; vy: number;
+      color: string; size: number; rotation: number; rotationSpeed: number;
+    }> = [];
+
+    const colors = ['#10b981', '#06b6d4', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899'];
+
+    // Create particles
+    for (let i = 0; i < 150; i++) {
+      particles.push({
+        x: Math.random() * canvas.width,
+        y: -20 - Math.random() * 100,
+        vx: (Math.random() - 0.5) * 8,
+        vy: Math.random() * 3 + 2,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        size: Math.random() * 8 + 4,
+        rotation: Math.random() * 360,
+        rotationSpeed: (Math.random() - 0.5) * 10
+      });
+    }
+
+    let animationId: number;
+    let frame = 0;
+
+    const animate = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      particles.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.1; // gravity
+        p.rotation += p.rotationSpeed;
+
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate((p.rotation * Math.PI) / 180);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+        ctx.restore();
+      });
+
+      frame++;
+      if (frame < 180) {
+        animationId = requestAnimationFrame(animate);
+      } else {
+        onComplete();
+      }
+    };
+
+    animate();
+
+    return () => cancelAnimationFrame(animationId);
+  }, [active, onComplete]);
+
+  if (!active) return null;
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'none',
+        zIndex: 9999
+      }}
+    />
+  );
+}
+
+// ============ TOAST NOTIFICATION ============
+function Toast({ message, visible, type = 'success' }: { message: string; visible: boolean; type?: 'success' | 'info' }) {
+  return (
+    <div style={{
+      position: 'fixed',
+      bottom: '24px',
+      right: '24px',
+      padding: '12px 20px',
+      backgroundColor: type === 'success' ? '#10b981' : '#3b82f6',
+      color: '#ffffff',
+      borderRadius: '12px',
+      fontSize: '14px',
+      fontWeight: '500',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+      transform: visible ? 'translateY(0)' : 'translateY(100px)',
+      opacity: visible ? 1 : 0,
+      transition: 'all 0.3s ease',
+      zIndex: 1000,
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px'
+    }}>
+      <CheckCircle2 style={{ width: '16px', height: '16px' }} />
+      {message}
+    </div>
+  );
+}
 
 // Types
+interface Payment {
+  id: number;
+  debtId: number;
+  debtName: string;
+  amount: number;
+  date: string;
+  note?: string;
+}
+
 interface Debt {
   id: number;
   name: string;
@@ -78,8 +232,15 @@ const navItems = [
   { id: 'debts', label: 'Debts', icon: CreditCard },
   { id: 'expenses', label: 'Expenses', icon: Receipt },
   { id: 'plan', label: 'Payoff Plan', icon: Map },
+  { id: 'summary', label: 'Summary', icon: FileText },
   { id: 'insights', label: 'AI Insights', icon: Brain },
 ];
+
+// Import Firebase helpers
+import { isFirebaseConfigured, saveToFirestore, subscribeToFirestore } from './firebase';
+
+// Unique family ID - change this to create separate "accounts"
+const FAMILY_ID = 'bones-family';
 
 // Helper to load from localStorage
 function loadFromStorage<T>(key: string, defaultValue: T): T {
@@ -91,12 +252,16 @@ function loadFromStorage<T>(key: string, defaultValue: T): T {
   }
 }
 
-// Helper to save to localStorage
+// Helper to save to localStorage (and Firestore if configured)
 function saveToStorage<T>(key: string, value: T): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
+    // Also save to Firestore if configured
+    if (isFirebaseConfigured()) {
+      saveToFirestore('budgets', `${FAMILY_ID}-${key}`, value);
+    }
   } catch (e) {
-    console.error('Failed to save to localStorage:', e);
+    console.error('Failed to save:', e);
   }
 }
 
@@ -196,7 +361,7 @@ function generateAITips(debts: Debt[], expenses: Expense[], extraPayment: number
   // Quick wins based on debt amounts
   const smallDebts = debts.filter(d => d.balance < 5000 && d.balance > 0);
   if (smallDebts.length > 0) {
-    const smallest = smallDebts.sort((a, b) => a.balance - b.balance)[0];
+    const smallest = [...smallDebts].sort((a, b) => a.balance - b.balance)[0];
     const monthsToPayoff = Math.ceil(smallest.balance / (smallest.minPayment + extraPayment));
     tips.push({
       type: 'opportunity',
@@ -214,18 +379,74 @@ export default function DebtTracker() {
   const [debts, setDebts] = useState<Debt[]>(() => loadFromStorage('debts', defaultDebts));
   const [expenses, setExpenses] = useState<Expense[]>(() => loadFromStorage('expenses', defaultExpenses));
   const [extraPayment, setExtraPayment] = useState<number>(() => loadFromStorage('extraPayment', 500));
+  const [payments, setPayments] = useState<Payment[]>(() => loadFromStorage('payments', []));
   const [showAddDebt, setShowAddDebt] = useState(false);
   const [showAddExpense, setShowAddExpense] = useState(false);
+  const [showAddPayment, setShowAddPayment] = useState(false);
+  const [showPaymentHistory, setShowPaymentHistory] = useState(false);
   const [newDebt, setNewDebt] = useState({ name: '', balance: '', rate: '', minPayment: '' });
   const [newExpense, setNewExpense] = useState({ name: '', amount: '', category: 'Personal' });
+  const [newPayment, setNewPayment] = useState({ debtId: '', amount: '', note: '' });
   const [editingDebt, setEditingDebt] = useState<number | null>(null);
   const [editBalance, setEditBalance] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [whatIfExtra, setWhatIfExtra] = useState(0);
+  const summaryRef = useRef<HTMLDivElement>(null);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' as 'success' | 'info' });
+  const [milestoneReached, setMilestoneReached] = useState<string | null>(null);
+
+  // Show toast helper
+  const showToast = useCallback((message: string, type: 'success' | 'info' = 'success') => {
+    setToast({ visible: true, message, type });
+    setTimeout(() => setToast(t => ({ ...t, visible: false })), 3000);
+  }, []);
+
+  // Check for milestones
+  const checkMilestones = useCallback((oldTotal: number, newTotal: number, originalTotal: number) => {
+    const oldPercent = Math.floor((1 - oldTotal / originalTotal) * 100);
+    const newPercent = Math.floor((1 - newTotal / originalTotal) * 100);
+
+    const milestones = [25, 50, 75, 100];
+    for (const milestone of milestones) {
+      if (oldPercent < milestone && newPercent >= milestone) {
+        setMilestoneReached(`${milestone}% of debt eliminated!`);
+        setShowConfetti(true);
+        return;
+      }
+    }
+  }, []);
 
   // Save to localStorage when data changes
   useEffect(() => { saveToStorage('debts', debts); }, [debts]);
   useEffect(() => { saveToStorage('expenses', expenses); }, [expenses]);
   useEffect(() => { saveToStorage('extraPayment', extraPayment); }, [extraPayment]);
+  useEffect(() => { saveToStorage('payments', payments); }, [payments]);
+
+  // Subscribe to Firestore updates for real-time sync
+  useEffect(() => {
+    if (!isFirebaseConfigured()) return;
+
+    const unsubDebts = subscribeToFirestore<Debt[]>('budgets', `${FAMILY_ID}-debts`, (data) => {
+      if (data) setDebts(data);
+    });
+    const unsubExpenses = subscribeToFirestore<Expense[]>('budgets', `${FAMILY_ID}-expenses`, (data) => {
+      if (data) setExpenses(data);
+    });
+    const unsubExtra = subscribeToFirestore<number>('budgets', `${FAMILY_ID}-extraPayment`, (data) => {
+      if (data !== null) setExtraPayment(data);
+    });
+    const unsubPayments = subscribeToFirestore<Payment[]>('budgets', `${FAMILY_ID}-payments`, (data) => {
+      if (data) setPayments(data);
+    });
+
+    return () => {
+      unsubDebts();
+      unsubExpenses();
+      unsubExtra();
+      unsubPayments();
+    };
+  }, []);
 
   const totalDebt = useMemo(() => debts.reduce((sum, d) => sum + d.balance, 0), [debts]);
   const totalMinPayments = useMemo(() => debts.reduce((sum, d) => sum + d.minPayment, 0), [debts]);
@@ -234,6 +455,263 @@ export default function DebtTracker() {
 
   // Generate dynamic AI tips
   const aiTips = useMemo(() => generateAITips(debts, expenses, extraPayment), [debts, expenses, extraPayment]);
+
+  // Calculate debt-free date and total interest
+  const debtFreeCalculation = useMemo(() => {
+    const calculatePayoff = (additionalExtra: number = 0) => {
+      // Handle edge case of no debts
+      if (!debts || debts.length === 0) {
+        return {
+          months: 0,
+          debtFreeDate: new Date(),
+          totalInterestPaid: 0,
+          years: 0,
+          remainingMonths: 0
+        };
+      }
+
+      const debtsCopy = debts.map(d => ({ ...d, currentBalance: d.balance || 0 }));
+      const sortedDebts = [...debtsCopy].sort((a, b) => (b.rate || 0) - (a.rate || 0)); // Avalanche method
+      let months = 0;
+      let totalInterestPaid = 0;
+      const monthlyExtra = (extraPayment || 0) + (additionalExtra || 0);
+
+      while (sortedDebts.some(d => d.currentBalance > 0) && months < 600) {
+        months++;
+        let availableExtra = monthlyExtra;
+
+        // Apply minimum payments and interest to all debts
+        for (const debt of sortedDebts) {
+          if (debt.currentBalance <= 0) continue;
+
+          const monthlyInterest = debt.currentBalance * (debt.rate / 100 / 12);
+          totalInterestPaid += monthlyInterest;
+          debt.currentBalance += monthlyInterest;
+
+          const payment = Math.min(debt.minPayment, debt.currentBalance);
+          debt.currentBalance -= payment;
+        }
+
+        // Apply extra payment to highest rate debt with remaining balance
+        for (const debt of sortedDebts) {
+          if (debt.currentBalance > 0 && availableExtra > 0) {
+            const extraPmt = Math.min(availableExtra, debt.currentBalance);
+            debt.currentBalance -= extraPmt;
+            availableExtra -= extraPmt;
+            if (debt.currentBalance <= 0) continue;
+          }
+        }
+      }
+
+      const debtFreeDate = new Date();
+      debtFreeDate.setMonth(debtFreeDate.getMonth() + months);
+
+      return {
+        months,
+        debtFreeDate,
+        totalInterestPaid: Math.round(totalInterestPaid),
+        years: Math.floor(months / 12),
+        remainingMonths: months % 12
+      };
+    };
+
+    const current = calculatePayoff(0);
+    const withExtra = whatIfExtra > 0 ? calculatePayoff(whatIfExtra) : null;
+
+    return {
+      current,
+      withExtra,
+      monthsSaved: withExtra ? current.months - withExtra.months : 0,
+      interestSaved: withExtra ? current.totalInterestPaid - withExtra.totalInterestPaid : 0
+    };
+  }, [debts, extraPayment, whatIfExtra]);
+
+  // Monthly summary calculations
+  const monthlySummary = useMemo(() => {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    // Filter payments from current month (with safety check)
+    const safePayments = payments || [];
+    const thisMonthPayments = safePayments.filter(p => {
+      if (!p || !p.date) return false;
+      const paymentDate = new Date(p.date);
+      return paymentDate.getMonth() === currentMonth && paymentDate.getFullYear() === currentYear;
+    });
+
+    const totalPaidThisMonth = thisMonthPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+    const paymentsCount = thisMonthPayments.length;
+
+    // Calculate total paid all time
+    const totalPaidAllTime = safePayments.reduce((sum, p) => sum + (p?.amount || 0), 0);
+
+    // Calculate original total debt (with safety check)
+    const safeDebts = debts || [];
+    const originalTotalDebt = safeDebts.reduce((sum, d) => sum + (d?.originalBalance || 0), 0);
+
+    // Calculate progress percentage
+    const progressPercent = originalTotalDebt > 0 ? Math.round((1 - (totalDebt || 0) / originalTotalDebt) * 100) : 0;
+
+    // Calculate this month's interest cost
+    const thisMonthInterest = safeDebts.reduce((sum, d) => sum + ((d?.balance || 0) * ((d?.rate || 0) / 100) / 12), 0);
+
+    // Calculate average payment
+    const avgPayment = safePayments.length > 0 ? totalPaidAllTime / safePayments.length : 0;
+
+    // Best month calculation
+    const paymentsByMonth: Record<string, number> = {};
+    safePayments.forEach(p => {
+      if (!p || !p.date) return;
+      const date = new Date(p.date);
+      const key = `${date.getFullYear()}-${date.getMonth()}`;
+      paymentsByMonth[key] = (paymentsByMonth[key] || 0) + (p.amount || 0);
+    });
+    const bestMonth = Object.entries(paymentsByMonth).sort((a, b) => b[1] - a[1])[0];
+
+    return {
+      thisMonthPayments,
+      totalPaidThisMonth,
+      paymentsCount,
+      totalPaidAllTime,
+      originalTotalDebt,
+      progressPercent,
+      thisMonthInterest: Math.round(thisMonthInterest),
+      avgPayment: Math.round(avgPayment),
+      bestMonthAmount: bestMonth ? bestMonth[1] : 0,
+      monthName: now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    };
+  }, [debts, payments, totalDebt]);
+
+  // PDF Export function
+  const exportToPDF = useCallback(async () => {
+    const jsPDFModule = await import('jspdf');
+    const jsPDF = jsPDFModule.default;
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pageWidth = pdf.internal.pageSize.getWidth();
+
+    // Title
+    pdf.setFontSize(24);
+    pdf.setTextColor(16, 185, 129);
+    pdf.text('BonesBudget Report', pageWidth / 2, 20, { align: 'center' });
+
+    // Date
+    pdf.setFontSize(10);
+    pdf.setTextColor(100);
+    pdf.text(`Generated: ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`, pageWidth / 2, 28, { align: 'center' });
+
+    let yPos = 45;
+
+    // Summary Section
+    pdf.setFontSize(16);
+    pdf.setTextColor(40);
+    pdf.text('Financial Summary', 20, yPos);
+    yPos += 10;
+
+    pdf.setFontSize(11);
+    pdf.setTextColor(60);
+
+    const summaryData = [
+      ['Total Debt Remaining:', `$${totalDebt.toLocaleString()}`],
+      ['Original Total Debt:', `$${monthlySummary.originalTotalDebt.toLocaleString()}`],
+      ['Total Paid:', `$${monthlySummary.totalPaidAllTime.toLocaleString()}`],
+      ['Progress:', `${monthlySummary.progressPercent}% eliminated`],
+      ['Debt-Free Date:', debtFreeCalculation.current.debtFreeDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })],
+      ['Est. Interest Remaining:', `$${debtFreeCalculation.current.totalInterestPaid.toLocaleString()}`],
+    ];
+
+    summaryData.forEach(([label, value]) => {
+      pdf.setTextColor(80);
+      pdf.text(label, 25, yPos);
+      pdf.setTextColor(40);
+      pdf.text(value, 100, yPos);
+      yPos += 7;
+    });
+
+    yPos += 10;
+
+    // Debts Section
+    pdf.setFontSize(16);
+    pdf.setTextColor(40);
+    pdf.text('Debt Breakdown', 20, yPos);
+    yPos += 10;
+
+    pdf.setFontSize(10);
+    [...debts].sort((a, b) => a.priority - b.priority).forEach(debt => {
+      if (yPos > 270) {
+        pdf.addPage();
+        yPos = 20;
+      }
+
+      const paidPercent = Math.round((1 - debt.balance / debt.originalBalance) * 100);
+      pdf.setTextColor(60);
+      pdf.text(`${debt.name}`, 25, yPos);
+      pdf.text(`$${debt.balance.toLocaleString()}`, 100, yPos);
+      pdf.text(`${debt.rate}% APR`, 140, yPos);
+      pdf.text(`${paidPercent}% paid`, 170, yPos);
+      yPos += 6;
+    });
+
+    yPos += 10;
+
+    // Monthly Expenses Section
+    if (yPos > 240) {
+      pdf.addPage();
+      yPos = 20;
+    }
+
+    pdf.setFontSize(16);
+    pdf.setTextColor(40);
+    pdf.text('Monthly Expenses', 20, yPos);
+    yPos += 10;
+
+    pdf.setFontSize(10);
+    pdf.setTextColor(60);
+    pdf.text(`Total Monthly Expenses: $${totalExpenses.toLocaleString()}`, 25, yPos);
+    yPos += 7;
+    pdf.text(`Monthly Debt Payments: $${totalMinPayments.toLocaleString()}`, 25, yPos);
+    yPos += 7;
+    pdf.text(`Extra Payment: $${extraPayment.toLocaleString()}`, 25, yPos);
+    yPos += 12;
+
+    // Recent Payments
+    if (payments.length > 0) {
+      if (yPos > 220) {
+        pdf.addPage();
+        yPos = 20;
+      }
+
+      pdf.setFontSize(16);
+      pdf.setTextColor(40);
+      pdf.text('Recent Payments', 20, yPos);
+      yPos += 10;
+
+      pdf.setFontSize(10);
+      const recentPayments = [...payments].reverse().slice(0, 10);
+      recentPayments.forEach(payment => {
+        if (yPos > 280) {
+          pdf.addPage();
+          yPos = 20;
+        }
+        const date = new Date(payment.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        pdf.setTextColor(60);
+        pdf.text(date, 25, yPos);
+        pdf.text(payment.debtName, 60, yPos);
+        pdf.setTextColor(16, 185, 129);
+        pdf.text(`$${payment.amount.toLocaleString()}`, 140, yPos);
+        yPos += 6;
+      });
+    }
+
+    // Footer
+    pdf.setFontSize(8);
+    pdf.setTextColor(150);
+    pdf.text('Generated by BonesBudget - Your path to financial freedom', pageWidth / 2, 290, { align: 'center' });
+
+    // Save the PDF
+    pdf.save(`BonesBudget-Report-${new Date().toISOString().split('T')[0]}.pdf`);
+    showToast('PDF report downloaded!', 'success');
+  }, [debts, payments, totalDebt, totalExpenses, totalMinPayments, extraPayment, monthlySummary, debtFreeCalculation, showToast]);
 
   const expensesByCategory = useMemo(() => {
     const grouped: Record<string, number> = {};
@@ -322,11 +800,86 @@ export default function DebtTracker() {
     }
   };
 
+  const handleAddPayment = () => {
+    if (newPayment.debtId && newPayment.amount) {
+      const debtId = parseInt(newPayment.debtId);
+      const amount = parseFloat(newPayment.amount);
+      const debt = debts.find(d => d.id === debtId);
+
+      if (debt) {
+        const oldTotal = totalDebt;
+        const newBalance = Math.max(0, debt.balance - amount);
+        const originalTotal = debts.reduce((sum, d) => sum + d.originalBalance, 0);
+
+        // Add payment record
+        setPayments([...payments, {
+          id: Date.now(),
+          debtId,
+          debtName: debt.name,
+          amount,
+          date: new Date().toISOString(),
+          note: newPayment.note || undefined
+        }]);
+
+        // Update debt balance
+        setDebts(debts.map(d =>
+          d.id === debtId ? { ...d, balance: newBalance } : d
+        ));
+
+        // Check if debt is paid off
+        if (newBalance === 0 && debt.balance > 0) {
+          setMilestoneReached(`${debt.name} is PAID OFF!`);
+          setShowConfetti(true);
+        } else {
+          // Check for percentage milestones
+          const newTotal = oldTotal - amount;
+          checkMilestones(oldTotal, newTotal, originalTotal);
+        }
+
+        showToast(`Payment of $${amount.toLocaleString()} recorded!`);
+        setNewPayment({ debtId: '', amount: '', note: '' });
+        setShowAddPayment(false);
+      }
+    }
+  };
+
   const handleUpdateBalance = (debtId: number) => {
     if (editBalance) {
-      setDebts(debts.map(d =>
-        d.id === debtId ? { ...d, balance: parseFloat(editBalance) } : d
-      ));
+      const debt = debts.find(d => d.id === debtId);
+      const newBalance = parseFloat(editBalance);
+
+      if (debt) {
+        const oldTotal = totalDebt;
+        const originalTotal = debts.reduce((sum, d) => sum + d.originalBalance, 0);
+        const paymentAmount = debt.balance - newBalance;
+
+        // Log as a payment if balance decreased
+        if (paymentAmount > 0) {
+          setPayments([...payments, {
+            id: Date.now(),
+            debtId,
+            debtName: debt.name,
+            amount: paymentAmount,
+            date: new Date().toISOString(),
+            note: 'Balance update'
+          }]);
+
+          // Check if debt is paid off
+          if (newBalance === 0 && debt.balance > 0) {
+            setMilestoneReached(`${debt.name} is PAID OFF!`);
+            setShowConfetti(true);
+          } else {
+            const newTotal = debts.reduce((sum, d) => sum + (d.id === debtId ? newBalance : d.balance), 0);
+            checkMilestones(oldTotal, newTotal, originalTotal);
+          }
+
+          showToast(`Balance updated! $${paymentAmount.toLocaleString()} payment recorded.`);
+        }
+
+        setDebts(debts.map(d =>
+          d.id === debtId ? { ...d, balance: newBalance } : d
+        ));
+      }
     }
     setEditingDebt(null);
     setEditBalance('');
@@ -341,6 +894,146 @@ export default function DebtTracker() {
 
   return (
     <div className="flex min-h-screen" style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif', backgroundColor: '#000000', color: '#e5e5e5' }}>
+      {/* Confetti Effect */}
+      <Confetti active={showConfetti} onComplete={() => setShowConfetti(false)} />
+
+      {/* Toast Notification */}
+      <Toast message={toast.message} visible={toast.visible} type={toast.type} />
+
+      {/* Milestone Modal */}
+      {milestoneReached && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }} onClick={() => setMilestoneReached(null)}>
+          <div style={{
+            backgroundColor: '#0a0a0a',
+            borderRadius: '24px',
+            padding: '48px',
+            textAlign: 'center',
+            border: '1px solid #262626',
+            maxWidth: '400px',
+            animation: 'scaleIn 0.3s ease'
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{
+              width: '80px',
+              height: '80px',
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #10b981, #06b6d4)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 24px',
+              boxShadow: '0 8px 32px rgba(16, 185, 129, 0.4)'
+            }}>
+              <PartyPopper style={{ width: '40px', height: '40px', color: '#ffffff' }} />
+            </div>
+            <h2 style={{ fontSize: '28px', fontWeight: '700', color: '#fafafa', margin: '0 0 12px' }}>
+              Congratulations!
+            </h2>
+            <p style={{ fontSize: '18px', color: '#10b981', fontWeight: '600', margin: '0 0 24px' }}>
+              {milestoneReached}
+            </p>
+            <p style={{ fontSize: '14px', color: '#737373', margin: '0 0 24px' }}>
+              Keep up the amazing work! You're making incredible progress on your debt-free journey.
+            </p>
+            <button
+              onClick={() => setMilestoneReached(null)}
+              style={{
+                padding: '12px 32px',
+                background: 'linear-gradient(90deg, #059669, #10b981)',
+                borderRadius: '12px',
+                border: 'none',
+                color: '#ffffff',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: 'pointer'
+              }}
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Payment History Modal */}
+      {showPaymentHistory && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: '20px'
+        }} onClick={() => setShowPaymentHistory(false)}>
+          <div style={{
+            backgroundColor: '#0a0a0a',
+            borderRadius: '16px',
+            padding: '24px',
+            width: '100%',
+            maxWidth: '500px',
+            maxHeight: '80vh',
+            overflow: 'auto',
+            border: '1px solid #262626'
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#fafafa', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <History style={{ width: '20px', height: '20px', color: '#10b981' }} />
+                Payment History
+              </h3>
+              <button onClick={() => setShowPaymentHistory(false)} style={{ background: 'none', border: 'none', color: '#525252', cursor: 'pointer' }}>
+                <X style={{ width: '20px', height: '20px' }} />
+              </button>
+            </div>
+            {payments.length === 0 ? (
+              <p style={{ color: '#525252', textAlign: 'center', padding: '40px 0' }}>No payments recorded yet</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {[...payments].reverse().map(payment => (
+                  <div key={payment.id} style={{
+                    backgroundColor: '#141414',
+                    borderRadius: '12px',
+                    padding: '16px',
+                    border: '1px solid #262626'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <p style={{ fontWeight: '500', color: '#fafafa', margin: '0 0 4px' }}>{payment.debtName}</p>
+                        <p style={{ fontSize: '12px', color: '#525252', margin: 0 }}>
+                          {new Date(payment.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </p>
+                        {payment.note && <p style={{ fontSize: '12px', color: '#737373', margin: '4px 0 0', fontStyle: 'italic' }}>{payment.note}</p>}
+                      </div>
+                      <p style={{ fontFamily: 'ui-monospace, monospace', fontWeight: '600', color: '#10b981', margin: 0 }}>
+                        ${payment.amount.toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid #262626' }}>
+              <p style={{ fontSize: '14px', color: '#737373', margin: 0 }}>
+                Total Paid: <span style={{ color: '#10b981', fontWeight: '600' }}>${payments.reduce((sum, p) => sum + p.amount, 0).toLocaleString()}</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Mobile Menu Button */}
       <button
         onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -464,7 +1157,15 @@ export default function DebtTracker() {
             </p>
           </div>
           <p style={{ fontSize: '10px', color: '#404040', textAlign: 'center', margin: 0 }}>
-            Data saved locally on your device
+{isFirebaseConfigured() ? (
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981' }}>
+                <Cloud style={{ width: '12px', height: '12px' }} /> Synced to cloud
+              </span>
+            ) : (
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <CloudOff style={{ width: '12px', height: '12px' }} /> Local storage only
+              </span>
+            )}
           </p>
         </div>
       </aside>
@@ -483,6 +1184,7 @@ export default function DebtTracker() {
                 {activeTab === 'debts' && 'Manage and track all your debts'}
                 {activeTab === 'expenses' && 'Track your monthly spending'}
                 {activeTab === 'plan' && 'Your path to debt freedom'}
+                {activeTab === 'summary' && 'Your progress at a glance'}
                 {activeTab === 'insights' && 'AI-powered recommendations'}
               </p>
             </div>
@@ -502,6 +1204,91 @@ export default function DebtTracker() {
           {/* Dashboard Tab */}
           {activeTab === 'dashboard' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              {/* Quick Actions */}
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => setShowAddPayment(true)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '10px 20px',
+                    background: 'linear-gradient(90deg, #059669, #10b981)',
+                    borderRadius: '12px',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    border: 'none',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+                  }}
+                >
+                  <Plus style={{ width: '16px', height: '16px' }} /> Log Payment
+                </button>
+                <button
+                  onClick={() => setShowPaymentHistory(true)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '10px 20px',
+                    backgroundColor: '#141414',
+                    borderRadius: '12px',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    border: '1px solid #262626',
+                    color: '#a3a3a3',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <History style={{ width: '16px', height: '16px' }} /> Payment History ({payments.length})
+                </button>
+              </div>
+
+              {/* Add Payment Modal */}
+              {showAddPayment && (
+                <div style={{ backgroundColor: '#0a0a0a', borderRadius: '16px', padding: '24px', border: '1px solid #10b981' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                    <h3 style={{ fontWeight: '600', color: '#fafafa', margin: 0 }}>Log a Payment</h3>
+                    <button onClick={() => setShowAddPayment(false)} style={{ color: '#525252', background: 'none', border: 'none', cursor: 'pointer' }}>
+                      <X style={{ width: '20px', height: '20px' }} />
+                    </button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px' }}>
+                    <select
+                      value={newPayment.debtId}
+                      onChange={(e) => setNewPayment({...newPayment, debtId: e.target.value})}
+                      style={{ backgroundColor: '#141414', border: '1px solid #262626', borderRadius: '12px', padding: '12px 16px', fontSize: '14px', color: '#fafafa', outline: 'none' }}
+                    >
+                      <option value="">Select Debt</option>
+                      {debts.filter(d => d.balance > 0).map(debt => (
+                        <option key={debt.id} value={debt.id}>{debt.name} (${debt.balance.toLocaleString()})</option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      placeholder="Payment Amount"
+                      value={newPayment.amount}
+                      onChange={(e) => setNewPayment({...newPayment, amount: e.target.value})}
+                      style={{ backgroundColor: '#141414', border: '1px solid #262626', borderRadius: '12px', padding: '12px 16px', fontSize: '14px', color: '#fafafa', outline: 'none' }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Note (optional)"
+                      value={newPayment.note}
+                      onChange={(e) => setNewPayment({...newPayment, note: e.target.value})}
+                      style={{ backgroundColor: '#141414', border: '1px solid #262626', borderRadius: '12px', padding: '12px 16px', fontSize: '14px', color: '#fafafa', outline: 'none' }}
+                    />
+                  </div>
+                  <button
+                    onClick={handleAddPayment}
+                    style={{ marginTop: '16px', width: '100%', padding: '12px', background: 'linear-gradient(90deg, #059669, #10b981)', borderRadius: '12px', fontSize: '14px', fontWeight: '500', border: 'none', color: '#ffffff', cursor: 'pointer' }}
+                  >
+                    Record Payment
+                  </button>
+                </div>
+              )}
+
               {/* Stats Cards */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
                 <div style={{ backgroundColor: '#0a0a0a', borderRadius: '16px', padding: '20px', border: '1px solid #171717' }}>
@@ -512,9 +1299,9 @@ export default function DebtTracker() {
                     <span style={{ fontSize: '12px', color: '#525252', backgroundColor: '#141414', padding: '4px 8px', borderRadius: '8px' }}>Total</span>
                   </div>
                   <p style={{ fontSize: '28px', fontWeight: '700', color: '#fafafa', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
-                    {formatCurrency(totalDebt)}
+                    $<AnimatedNumber value={totalDebt} />
                   </p>
-                  <p style={{ fontSize: '12px', color: '#525252', marginTop: '4px', marginBottom: 0 }}>{debts.length} active accounts</p>
+                  <p style={{ fontSize: '12px', color: '#525252', marginTop: '4px', marginBottom: 0 }}>{debts.filter(d => d.balance > 0).length} active accounts</p>
                 </div>
 
                 <div style={{ backgroundColor: '#0a0a0a', borderRadius: '16px', padding: '20px', border: '1px solid #171717' }}>
@@ -525,7 +1312,7 @@ export default function DebtTracker() {
                     <span style={{ fontSize: '12px', color: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.1)', padding: '4px 8px', borderRadius: '8px' }}>+${extraPayment} extra</span>
                   </div>
                   <p style={{ fontSize: '28px', fontWeight: '700', color: '#fafafa', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
-                    {formatCurrency(totalMinPayments + extraPayment)}
+                    $<AnimatedNumber value={totalMinPayments + extraPayment} />
                   </p>
                   <p style={{ fontSize: '12px', color: '#525252', marginTop: '4px', marginBottom: 0 }}>Monthly payments</p>
                 </div>
@@ -538,7 +1325,7 @@ export default function DebtTracker() {
                     <span style={{ fontSize: '12px', color: '#f97316', backgroundColor: 'rgba(249, 115, 22, 0.1)', padding: '4px 8px', borderRadius: '8px' }}>Interest</span>
                   </div>
                   <p style={{ fontSize: '28px', fontWeight: '700', color: '#fafafa', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
-                    {formatCurrency(monthlyInterest)}
+                    $<AnimatedNumber value={Math.round(monthlyInterest)} />
                   </p>
                   <p style={{ fontSize: '12px', color: '#525252', marginTop: '4px', marginBottom: 0 }}>Lost monthly to interest</p>
                 </div>
@@ -548,10 +1335,12 @@ export default function DebtTracker() {
                     <div style={{ width: '40px', height: '40px', borderRadius: '12px', backgroundColor: 'rgba(6, 182, 212, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <Target style={{ width: '20px', height: '20px', color: '#06b6d4' }} />
                     </div>
-                    <span style={{ fontSize: '12px', color: '#06b6d4', backgroundColor: 'rgba(6, 182, 212, 0.1)', padding: '4px 8px', borderRadius: '8px' }}>Goal</span>
+                    <span style={{ fontSize: '12px', color: '#06b6d4', backgroundColor: 'rgba(6, 182, 212, 0.1)', padding: '4px 8px', borderRadius: '8px' }}>Paid</span>
                   </div>
-                  <p style={{ fontSize: '28px', fontWeight: '700', color: '#fafafa', margin: 0 }}>Oct 2036</p>
-                  <p style={{ fontSize: '12px', color: '#525252', marginTop: '4px', marginBottom: 0 }}>Debt-free target</p>
+                  <p style={{ fontSize: '28px', fontWeight: '700', color: '#10b981', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                    $<AnimatedNumber value={payments.reduce((sum, p) => sum + p.amount, 0)} />
+                  </p>
+                  <p style={{ fontSize: '12px', color: '#525252', marginTop: '4px', marginBottom: 0 }}>Total payments logged</p>
                 </div>
               </div>
 
@@ -569,7 +1358,7 @@ export default function DebtTracker() {
                     </button>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                    {debts.sort((a, b) => a.priority - b.priority).slice(0, 5).map((debt) => (
+                    {[...debts].sort((a, b) => a.priority - b.priority).slice(0, 5).map((debt) => (
                       <div key={debt.id}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -627,7 +1416,7 @@ export default function DebtTracker() {
                     <p style={{ fontSize: '12px', color: '#525252', marginTop: '4px', marginBottom: 0 }}>Total Monthly</p>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '144px', overflowY: 'auto' }}>
-                    {expensesByCategory.sort((a, b) => b.value - a.value).map((cat) => (
+                    {[...expensesByCategory].sort((a, b) => b.value - a.value).map((cat) => (
                       <div key={cat.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '14px', padding: '4px 0' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: cat.color }} />
@@ -704,7 +1493,7 @@ export default function DebtTracker() {
               )}
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {debts.sort((a, b) => a.priority - b.priority).map((debt) => (
+                {[...debts].sort((a, b) => a.priority - b.priority).map((debt) => (
                   <div key={debt.id} style={{ backgroundColor: '#0a0a0a', borderRadius: '16px', padding: '24px', border: '1px solid #171717' }}>
                     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
@@ -833,7 +1622,7 @@ export default function DebtTracker() {
                 <h3 style={{ fontWeight: '600', color: '#fafafa', marginBottom: '16px', marginTop: 0 }}>Spending by Category</h3>
                 <div style={{ height: '256px' }}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={expensesByCategory.sort((a, b) => b.value - a.value)} layout="vertical">
+                    <BarChart data={[...expensesByCategory].sort((a, b) => b.value - a.value)} layout="vertical">
                       <CartesianGrid strokeDasharray="3 3" stroke="#262626" horizontal={false} />
                       <XAxis type="number" tickFormatter={(v) => `$${v}`} stroke="#404040" axisLine={false} tickLine={false} />
                       <YAxis type="category" dataKey="name" stroke="#525252" width={100} axisLine={false} tickLine={false} />
@@ -961,6 +1750,296 @@ export default function DebtTracker() {
             </div>
           )}
 
+          {/* Summary Tab */}
+          {activeTab === 'summary' && (
+            <div ref={summaryRef} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              {/* Export Button */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  onClick={exportToPDF}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '10px 20px',
+                    background: 'linear-gradient(90deg, #7c3aed, #8b5cf6)',
+                    borderRadius: '12px',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    border: 'none',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(124, 58, 237, 0.3)'
+                  }}
+                >
+                  <Download style={{ width: '16px', height: '16px' }} /> Export PDF Report
+                </button>
+              </div>
+
+              {/* Debt-Free Date Calculator */}
+              <div style={{ background: 'linear-gradient(90deg, rgba(16, 185, 129, 0.08), rgba(6, 182, 212, 0.05))', borderRadius: '16px', padding: '24px', border: '1px solid rgba(16, 185, 129, 0.15)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+                  <div style={{ width: '48px', height: '48px', borderRadius: '16px', background: 'linear-gradient(135deg, #10b981, #06b6d4)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)' }}>
+                    <Calendar style={{ width: '24px', height: '24px', color: '#ffffff' }} />
+                  </div>
+                  <div>
+                    <h3 style={{ fontWeight: '600', color: '#fafafa', margin: 0, fontSize: '18px' }}>Debt-Free Date Calculator</h3>
+                    <p style={{ fontSize: '14px', color: '#525252', margin: '4px 0 0 0' }}>Based on your current payment strategy</p>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+                  <div style={{ backgroundColor: 'rgba(10, 10, 10, 0.5)', borderRadius: '12px', padding: '20px', textAlign: 'center' }}>
+                    <p style={{ fontSize: '14px', color: '#525252', margin: '0 0 8px 0' }}>You'll be debt-free by</p>
+                    <p style={{ fontSize: '28px', fontWeight: '700', color: '#10b981', margin: 0 }}>
+                      {debtFreeCalculation.current.debtFreeDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                    </p>
+                    <p style={{ fontSize: '14px', color: '#737373', margin: '8px 0 0 0' }}>
+                      {debtFreeCalculation.current.years} years, {debtFreeCalculation.current.remainingMonths} months
+                    </p>
+                  </div>
+
+                  <div style={{ backgroundColor: 'rgba(10, 10, 10, 0.5)', borderRadius: '12px', padding: '20px', textAlign: 'center' }}>
+                    <p style={{ fontSize: '14px', color: '#525252', margin: '0 0 8px 0' }}>Estimated Interest to Pay</p>
+                    <p style={{ fontSize: '28px', fontWeight: '700', color: '#f97316', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                      ${debtFreeCalculation.current.totalInterestPaid.toLocaleString()}
+                    </p>
+                    <p style={{ fontSize: '14px', color: '#737373', margin: '8px 0 0 0' }}>
+                      Over {debtFreeCalculation.current.months} months
+                    </p>
+                  </div>
+
+                  <div style={{ backgroundColor: 'rgba(10, 10, 10, 0.5)', borderRadius: '12px', padding: '20px', textAlign: 'center' }}>
+                    <p style={{ fontSize: '14px', color: '#525252', margin: '0 0 8px 0' }}>Current Monthly Payment</p>
+                    <p style={{ fontSize: '28px', fontWeight: '700', color: '#fafafa', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                      ${(totalMinPayments + extraPayment).toLocaleString()}
+                    </p>
+                    <p style={{ fontSize: '14px', color: '#10b981', margin: '8px 0 0 0' }}>
+                      Includes ${extraPayment} extra
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* What-If Scenarios */}
+              <div style={{ backgroundColor: '#0a0a0a', borderRadius: '16px', padding: '24px', border: '1px solid #171717' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+                  <div style={{ width: '48px', height: '48px', borderRadius: '16px', backgroundColor: 'rgba(139, 92, 246, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Calculator style={{ width: '24px', height: '24px', color: '#8b5cf6' }} />
+                  </div>
+                  <div>
+                    <h3 style={{ fontWeight: '600', color: '#fafafa', margin: 0, fontSize: '18px' }}>What-If Scenarios</h3>
+                    <p style={{ fontSize: '14px', color: '#525252', margin: '4px 0 0 0' }}>See how extra payments affect your payoff</p>
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '24px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <span style={{ color: '#a3a3a3', fontSize: '14px' }}>Additional monthly payment:</span>
+                    <span style={{ color: '#8b5cf6', fontSize: '24px', fontWeight: '700', fontFamily: 'ui-monospace, monospace' }}>${whatIfExtra}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1000"
+                    step="50"
+                    value={whatIfExtra}
+                    onChange={(e) => setWhatIfExtra(parseInt(e.target.value))}
+                    style={{ width: '100%', height: '8px', backgroundColor: '#262626', borderRadius: '999px', appearance: 'none', cursor: 'pointer', accentColor: '#8b5cf6' }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#404040', marginTop: '8px' }}>
+                    <span>$0</span><span>$250</span><span>$500</span><span>$750</span><span>$1,000</span>
+                  </div>
+                </div>
+
+                {whatIfExtra > 0 && debtFreeCalculation.withExtra && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+                    <div style={{ background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.05))', borderRadius: '12px', padding: '20px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                        <ArrowDownRight style={{ width: '20px', height: '20px', color: '#10b981' }} />
+                        <span style={{ color: '#525252', fontSize: '14px' }}>New Debt-Free Date</span>
+                      </div>
+                      <p style={{ fontSize: '24px', fontWeight: '700', color: '#10b981', margin: 0 }}>
+                        {debtFreeCalculation.withExtra.debtFreeDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                      </p>
+                      <p style={{ fontSize: '14px', color: '#737373', margin: '8px 0 0 0' }}>
+                        {debtFreeCalculation.withExtra.years}y {debtFreeCalculation.withExtra.remainingMonths}m
+                      </p>
+                    </div>
+
+                    <div style={{ background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(6, 182, 212, 0.05))', borderRadius: '12px', padding: '20px', border: '1px solid rgba(6, 182, 212, 0.2)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                        <Calendar style={{ width: '20px', height: '20px', color: '#06b6d4' }} />
+                        <span style={{ color: '#525252', fontSize: '14px' }}>Time Saved</span>
+                      </div>
+                      <p style={{ fontSize: '24px', fontWeight: '700', color: '#06b6d4', margin: 0 }}>
+                        {Math.floor(debtFreeCalculation.monthsSaved / 12)}y {debtFreeCalculation.monthsSaved % 12}m
+                      </p>
+                      <p style={{ fontSize: '14px', color: '#737373', margin: '8px 0 0 0' }}>
+                        {debtFreeCalculation.monthsSaved} months faster
+                      </p>
+                    </div>
+
+                    <div style={{ background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.05))', borderRadius: '12px', padding: '20px', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                        <DollarSign style={{ width: '20px', height: '20px', color: '#f59e0b' }} />
+                        <span style={{ color: '#525252', fontSize: '14px' }}>Interest Saved</span>
+                      </div>
+                      <p style={{ fontSize: '24px', fontWeight: '700', color: '#f59e0b', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                        ${debtFreeCalculation.interestSaved.toLocaleString()}
+                      </p>
+                      <p style={{ fontSize: '14px', color: '#737373', margin: '8px 0 0 0' }}>
+                        That stays in your pocket
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {whatIfExtra === 0 && (
+                  <div style={{ textAlign: 'center', padding: '32px', color: '#525252' }}>
+                    <Calculator style={{ width: '48px', height: '48px', marginBottom: '16px', opacity: 0.5 }} />
+                    <p style={{ margin: 0 }}>Drag the slider above to see how extra payments would accelerate your debt payoff</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Monthly Summary */}
+              <div style={{ backgroundColor: '#0a0a0a', borderRadius: '16px', padding: '24px', border: '1px solid #171717' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ width: '48px', height: '48px', borderRadius: '16px', backgroundColor: 'rgba(59, 130, 246, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <FileText style={{ width: '24px', height: '24px', color: '#3b82f6' }} />
+                    </div>
+                    <div>
+                      <h3 style={{ fontWeight: '600', color: '#fafafa', margin: 0, fontSize: '18px' }}>Monthly Summary</h3>
+                      <p style={{ fontSize: '14px', color: '#525252', margin: '4px 0 0 0' }}>{monthlySummary.monthName}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+                  <div style={{ backgroundColor: '#141414', borderRadius: '12px', padding: '16px', textAlign: 'center' }}>
+                    <p style={{ fontSize: '12px', color: '#525252', margin: '0 0 8px 0' }}>Paid This Month</p>
+                    <p style={{ fontSize: '24px', fontWeight: '700', color: '#10b981', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                      ${monthlySummary.totalPaidThisMonth.toLocaleString()}
+                    </p>
+                    <p style={{ fontSize: '12px', color: '#525252', margin: '4px 0 0 0' }}>{monthlySummary.paymentsCount} payments</p>
+                  </div>
+
+                  <div style={{ backgroundColor: '#141414', borderRadius: '12px', padding: '16px', textAlign: 'center' }}>
+                    <p style={{ fontSize: '12px', color: '#525252', margin: '0 0 8px 0' }}>All-Time Paid</p>
+                    <p style={{ fontSize: '24px', fontWeight: '700', color: '#06b6d4', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                      ${monthlySummary.totalPaidAllTime.toLocaleString()}
+                    </p>
+                    <p style={{ fontSize: '12px', color: '#525252', margin: '4px 0 0 0' }}>{payments.length} total payments</p>
+                  </div>
+
+                  <div style={{ backgroundColor: '#141414', borderRadius: '12px', padding: '16px', textAlign: 'center' }}>
+                    <p style={{ fontSize: '12px', color: '#525252', margin: '0 0 8px 0' }}>Progress</p>
+                    <p style={{ fontSize: '24px', fontWeight: '700', color: '#8b5cf6', margin: 0 }}>
+                      {monthlySummary.progressPercent}%
+                    </p>
+                    <p style={{ fontSize: '12px', color: '#525252', margin: '4px 0 0 0' }}>debt eliminated</p>
+                  </div>
+
+                  <div style={{ backgroundColor: '#141414', borderRadius: '12px', padding: '16px', textAlign: 'center' }}>
+                    <p style={{ fontSize: '12px', color: '#525252', margin: '0 0 8px 0' }}>Monthly Interest</p>
+                    <p style={{ fontSize: '24px', fontWeight: '700', color: '#f97316', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                      ${monthlySummary.thisMonthInterest.toLocaleString()}
+                    </p>
+                    <p style={{ fontSize: '12px', color: '#525252', margin: '4px 0 0 0' }}>going to interest</p>
+                  </div>
+                </div>
+
+                {/* Progress Bar */}
+                <div style={{ marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span style={{ color: '#525252', fontSize: '14px' }}>Overall Progress</span>
+                    <span style={{ color: '#10b981', fontSize: '14px', fontWeight: '600' }}>{monthlySummary.progressPercent}%</span>
+                  </div>
+                  <div style={{ height: '12px', backgroundColor: '#171717', borderRadius: '999px', overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%',
+                      width: `${Math.max(2, monthlySummary.progressPercent)}%`,
+                      background: 'linear-gradient(90deg, #10b981, #06b6d4)',
+                      borderRadius: '999px',
+                      transition: 'width 0.5s ease'
+                    }} />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '12px', color: '#404040' }}>
+                    <span>${monthlySummary.totalPaidAllTime.toLocaleString()} paid</span>
+                    <span>${totalDebt.toLocaleString()} remaining</span>
+                  </div>
+                </div>
+
+                {/* Quick Stats */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', backgroundColor: '#141414', borderRadius: '12px', padding: '16px' }}>
+                    <div style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: 'rgba(16, 185, 129, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <TrendingUp style={{ width: '20px', height: '20px', color: '#10b981' }} />
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '12px', color: '#525252', margin: 0 }}>Avg Payment</p>
+                      <p style={{ fontSize: '18px', fontWeight: '600', color: '#fafafa', margin: '4px 0 0 0', fontFamily: 'ui-monospace, monospace' }}>
+                        ${monthlySummary.avgPayment.toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', backgroundColor: '#141414', borderRadius: '12px', padding: '16px' }}>
+                    <div style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: 'rgba(245, 158, 11, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Target style={{ width: '20px', height: '20px', color: '#f59e0b' }} />
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '12px', color: '#525252', margin: 0 }}>Best Month</p>
+                      <p style={{ fontSize: '18px', fontWeight: '600', color: '#fafafa', margin: '4px 0 0 0', fontFamily: 'ui-monospace, monospace' }}>
+                        ${monthlySummary.bestMonthAmount.toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', backgroundColor: '#141414', borderRadius: '12px', padding: '16px' }}>
+                    <div style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: 'rgba(6, 182, 212, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Calendar style={{ width: '20px', height: '20px', color: '#06b6d4' }} />
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '12px', color: '#525252', margin: 0 }}>Time to Freedom</p>
+                      <p style={{ fontSize: '18px', fontWeight: '600', color: '#fafafa', margin: '4px 0 0 0' }}>
+                        {debtFreeCalculation.current.years}y {debtFreeCalculation.current.remainingMonths}m
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* This Month's Payments */}
+              {monthlySummary.thisMonthPayments.length > 0 && (
+                <div style={{ backgroundColor: '#0a0a0a', borderRadius: '16px', padding: '24px', border: '1px solid #171717' }}>
+                  <h3 style={{ fontWeight: '600', color: '#fafafa', margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <History style={{ width: '20px', height: '20px', color: '#10b981' }} />
+                    This Month's Payments
+                  </h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {monthlySummary.thisMonthPayments.map(payment => (
+                      <div key={payment.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', backgroundColor: '#141414', borderRadius: '10px' }}>
+                        <div>
+                          <p style={{ fontWeight: '500', color: '#fafafa', margin: 0 }}>{payment.debtName}</p>
+                          <p style={{ fontSize: '12px', color: '#525252', margin: '4px 0 0 0' }}>
+                            {new Date(payment.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            {payment.note && ` • ${payment.note}`}
+                          </p>
+                        </div>
+                        <p style={{ fontWeight: '600', color: '#10b981', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                          ${payment.amount.toLocaleString()}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Insights Tab */}
           {activeTab === 'insights' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -1068,6 +2147,10 @@ export default function DebtTracker() {
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
+        }
+        @keyframes scaleIn {
+          from { transform: scale(0.9); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
         }
       `}</style>
     </div>
