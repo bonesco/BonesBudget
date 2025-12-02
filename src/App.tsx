@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
-import { TrendingDown, TrendingUp, DollarSign, CreditCard, Lightbulb, Target, Calendar, Plus, ChevronRight, CheckCircle2, AlertCircle, Sparkles, X, Trash2, LayoutDashboard, Receipt, Map, Brain, Settings, Edit3, Save, History, PartyPopper, Cloud, CloudOff, FileText, Download, Calculator, TrendingDown as TrendingDownIcon } from 'lucide-react';
+import { TrendingDown, TrendingUp, DollarSign, CreditCard, Lightbulb, Target, Calendar, Plus, ChevronRight, CheckCircle2, AlertCircle, Sparkles, X, Trash2, LayoutDashboard, Receipt, Map, Brain, Settings, Edit3, Save, History, PartyPopper, Cloud, CloudOff, FileText, Download, Calculator, ArrowDownRight } from 'lucide-react';
 import jsPDF from 'jspdf';
 
 // ============ ANIMATED NUMBER COMPONENT ============
@@ -538,7 +538,7 @@ export default function DebtTracker() {
     const originalTotalDebt = debts.reduce((sum, d) => sum + d.originalBalance, 0);
 
     // Calculate progress percentage
-    const progressPercent = Math.round((1 - totalDebt / originalTotalDebt) * 100);
+    const progressPercent = originalTotalDebt > 0 ? Math.round((1 - totalDebt / originalTotalDebt) * 100) : 0;
 
     // Calculate this month's interest cost
     const thisMonthInterest = debts.reduce((sum, d) => sum + (d.balance * (d.rate / 100) / 12), 0);
@@ -1840,7 +1840,7 @@ export default function DebtTracker() {
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
                     <div style={{ background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.05))', borderRadius: '12px', padding: '20px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                        <TrendingDownIcon style={{ width: '20px', height: '20px', color: '#10b981' }} />
+                        <ArrowDownRight style={{ width: '20px', height: '20px', color: '#10b981' }} />
                         <span style={{ color: '#525252', fontSize: '14px' }}>New Debt-Free Date</span>
                       </div>
                       <p style={{ fontSize: '24px', fontWeight: '700', color: '#10b981', margin: 0 }}>
