@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
-import { TrendingDown, TrendingUp, DollarSign, CreditCard, Lightbulb, Target, Calendar, Plus, ChevronRight, CheckCircle2, AlertCircle, Sparkles, X, Trash2, LayoutDashboard, Receipt, Map, Brain, Settings, Edit3, Save, History, PartyPopper, Cloud, CloudOff } from 'lucide-react';
+import { TrendingDown, TrendingUp, DollarSign, CreditCard, Lightbulb, Target, Calendar, Plus, ChevronRight, CheckCircle2, AlertCircle, Sparkles, X, Trash2, LayoutDashboard, Receipt, Map, Brain, Settings, Edit3, Save, History, PartyPopper, Cloud, CloudOff, FileText, Download, Calculator, TrendingDown as TrendingDownIcon } from 'lucide-react';
+import jsPDF from 'jspdf';
 
 // ============ ANIMATED NUMBER COMPONENT ============
 function AnimatedNumber({ value, duration = 500, prefix = '', suffix = '' }: { value: number; duration?: number; prefix?: string; suffix?: string }) {
@@ -232,6 +233,7 @@ const navItems = [
   { id: 'debts', label: 'Debts', icon: CreditCard },
   { id: 'expenses', label: 'Expenses', icon: Receipt },
   { id: 'plan', label: 'Payoff Plan', icon: Map },
+  { id: 'summary', label: 'Summary', icon: FileText },
   { id: 'insights', label: 'AI Insights', icon: Brain },
 ];
 
@@ -389,6 +391,8 @@ export default function DebtTracker() {
   const [editingDebt, setEditingDebt] = useState<number | null>(null);
   const [editBalance, setEditBalance] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [whatIfExtra, setWhatIfExtra] = useState(0);
+  const summaryRef = useRef<HTMLDivElement>(null);
   const [showConfetti, setShowConfetti] = useState(false);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' as 'success' | 'info' });
   const [milestoneReached, setMilestoneReached] = useState<string | null>(null);
@@ -452,6 +456,246 @@ export default function DebtTracker() {
 
   // Generate dynamic AI tips
   const aiTips = useMemo(() => generateAITips(debts, expenses, extraPayment), [debts, expenses, extraPayment]);
+
+  // Calculate debt-free date and total interest
+  const debtFreeCalculation = useMemo(() => {
+    const calculatePayoff = (additionalExtra: number = 0) => {
+      const debtsCopy = debts.map(d => ({ ...d, currentBalance: d.balance }));
+      const sortedDebts = [...debtsCopy].sort((a, b) => b.rate - a.rate); // Avalanche method
+      let months = 0;
+      let totalInterestPaid = 0;
+      const monthlyExtra = extraPayment + additionalExtra;
+
+      while (sortedDebts.some(d => d.currentBalance > 0) && months < 600) {
+        months++;
+        let availableExtra = monthlyExtra;
+
+        // Apply minimum payments and interest to all debts
+        for (const debt of sortedDebts) {
+          if (debt.currentBalance <= 0) continue;
+
+          const monthlyInterest = debt.currentBalance * (debt.rate / 100 / 12);
+          totalInterestPaid += monthlyInterest;
+          debt.currentBalance += monthlyInterest;
+
+          const payment = Math.min(debt.minPayment, debt.currentBalance);
+          debt.currentBalance -= payment;
+        }
+
+        // Apply extra payment to highest rate debt with remaining balance
+        for (const debt of sortedDebts) {
+          if (debt.currentBalance > 0 && availableExtra > 0) {
+            const extraPmt = Math.min(availableExtra, debt.currentBalance);
+            debt.currentBalance -= extraPmt;
+            availableExtra -= extraPmt;
+            if (debt.currentBalance <= 0) continue;
+          }
+        }
+      }
+
+      const debtFreeDate = new Date();
+      debtFreeDate.setMonth(debtFreeDate.getMonth() + months);
+
+      return {
+        months,
+        debtFreeDate,
+        totalInterestPaid: Math.round(totalInterestPaid),
+        years: Math.floor(months / 12),
+        remainingMonths: months % 12
+      };
+    };
+
+    const current = calculatePayoff(0);
+    const withExtra = whatIfExtra > 0 ? calculatePayoff(whatIfExtra) : null;
+
+    return {
+      current,
+      withExtra,
+      monthsSaved: withExtra ? current.months - withExtra.months : 0,
+      interestSaved: withExtra ? current.totalInterestPaid - withExtra.totalInterestPaid : 0
+    };
+  }, [debts, extraPayment, whatIfExtra]);
+
+  // Monthly summary calculations
+  const monthlySummary = useMemo(() => {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    // Filter payments from current month
+    const thisMonthPayments = payments.filter(p => {
+      const paymentDate = new Date(p.date);
+      return paymentDate.getMonth() === currentMonth && paymentDate.getFullYear() === currentYear;
+    });
+
+    const totalPaidThisMonth = thisMonthPayments.reduce((sum, p) => sum + p.amount, 0);
+    const paymentsCount = thisMonthPayments.length;
+
+    // Calculate total paid all time
+    const totalPaidAllTime = payments.reduce((sum, p) => sum + p.amount, 0);
+
+    // Calculate original total debt
+    const originalTotalDebt = debts.reduce((sum, d) => sum + d.originalBalance, 0);
+
+    // Calculate progress percentage
+    const progressPercent = Math.round((1 - totalDebt / originalTotalDebt) * 100);
+
+    // Calculate this month's interest cost
+    const thisMonthInterest = debts.reduce((sum, d) => sum + (d.balance * (d.rate / 100) / 12), 0);
+
+    // Calculate average payment
+    const avgPayment = payments.length > 0 ? totalPaidAllTime / payments.length : 0;
+
+    // Best month calculation
+    const paymentsByMonth: Record<string, number> = {};
+    payments.forEach(p => {
+      const date = new Date(p.date);
+      const key = `${date.getFullYear()}-${date.getMonth()}`;
+      paymentsByMonth[key] = (paymentsByMonth[key] || 0) + p.amount;
+    });
+    const bestMonth = Object.entries(paymentsByMonth).sort((a, b) => b[1] - a[1])[0];
+
+    return {
+      thisMonthPayments,
+      totalPaidThisMonth,
+      paymentsCount,
+      totalPaidAllTime,
+      originalTotalDebt,
+      progressPercent,
+      thisMonthInterest: Math.round(thisMonthInterest),
+      avgPayment: Math.round(avgPayment),
+      bestMonthAmount: bestMonth ? bestMonth[1] : 0,
+      monthName: now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    };
+  }, [debts, payments, totalDebt]);
+
+  // PDF Export function
+  const exportToPDF = useCallback(async () => {
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pageWidth = pdf.internal.pageSize.getWidth();
+
+    // Title
+    pdf.setFontSize(24);
+    pdf.setTextColor(16, 185, 129);
+    pdf.text('BonesBudget Report', pageWidth / 2, 20, { align: 'center' });
+
+    // Date
+    pdf.setFontSize(10);
+    pdf.setTextColor(100);
+    pdf.text(`Generated: ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`, pageWidth / 2, 28, { align: 'center' });
+
+    let yPos = 45;
+
+    // Summary Section
+    pdf.setFontSize(16);
+    pdf.setTextColor(40);
+    pdf.text('Financial Summary', 20, yPos);
+    yPos += 10;
+
+    pdf.setFontSize(11);
+    pdf.setTextColor(60);
+
+    const summaryData = [
+      ['Total Debt Remaining:', `$${totalDebt.toLocaleString()}`],
+      ['Original Total Debt:', `$${monthlySummary.originalTotalDebt.toLocaleString()}`],
+      ['Total Paid:', `$${monthlySummary.totalPaidAllTime.toLocaleString()}`],
+      ['Progress:', `${monthlySummary.progressPercent}% eliminated`],
+      ['Debt-Free Date:', debtFreeCalculation.current.debtFreeDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })],
+      ['Est. Interest Remaining:', `$${debtFreeCalculation.current.totalInterestPaid.toLocaleString()}`],
+    ];
+
+    summaryData.forEach(([label, value]) => {
+      pdf.setTextColor(80);
+      pdf.text(label, 25, yPos);
+      pdf.setTextColor(40);
+      pdf.text(value, 100, yPos);
+      yPos += 7;
+    });
+
+    yPos += 10;
+
+    // Debts Section
+    pdf.setFontSize(16);
+    pdf.setTextColor(40);
+    pdf.text('Debt Breakdown', 20, yPos);
+    yPos += 10;
+
+    pdf.setFontSize(10);
+    [...debts].sort((a, b) => a.priority - b.priority).forEach(debt => {
+      if (yPos > 270) {
+        pdf.addPage();
+        yPos = 20;
+      }
+
+      const paidPercent = Math.round((1 - debt.balance / debt.originalBalance) * 100);
+      pdf.setTextColor(60);
+      pdf.text(`${debt.name}`, 25, yPos);
+      pdf.text(`$${debt.balance.toLocaleString()}`, 100, yPos);
+      pdf.text(`${debt.rate}% APR`, 140, yPos);
+      pdf.text(`${paidPercent}% paid`, 170, yPos);
+      yPos += 6;
+    });
+
+    yPos += 10;
+
+    // Monthly Expenses Section
+    if (yPos > 240) {
+      pdf.addPage();
+      yPos = 20;
+    }
+
+    pdf.setFontSize(16);
+    pdf.setTextColor(40);
+    pdf.text('Monthly Expenses', 20, yPos);
+    yPos += 10;
+
+    pdf.setFontSize(10);
+    pdf.setTextColor(60);
+    pdf.text(`Total Monthly Expenses: $${totalExpenses.toLocaleString()}`, 25, yPos);
+    yPos += 7;
+    pdf.text(`Monthly Debt Payments: $${totalMinPayments.toLocaleString()}`, 25, yPos);
+    yPos += 7;
+    pdf.text(`Extra Payment: $${extraPayment.toLocaleString()}`, 25, yPos);
+    yPos += 12;
+
+    // Recent Payments
+    if (payments.length > 0) {
+      if (yPos > 220) {
+        pdf.addPage();
+        yPos = 20;
+      }
+
+      pdf.setFontSize(16);
+      pdf.setTextColor(40);
+      pdf.text('Recent Payments', 20, yPos);
+      yPos += 10;
+
+      pdf.setFontSize(10);
+      const recentPayments = [...payments].reverse().slice(0, 10);
+      recentPayments.forEach(payment => {
+        if (yPos > 280) {
+          pdf.addPage();
+          yPos = 20;
+        }
+        const date = new Date(payment.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        pdf.setTextColor(60);
+        pdf.text(date, 25, yPos);
+        pdf.text(payment.debtName, 60, yPos);
+        pdf.setTextColor(16, 185, 129);
+        pdf.text(`$${payment.amount.toLocaleString()}`, 140, yPos);
+        yPos += 6;
+      });
+    }
+
+    // Footer
+    pdf.setFontSize(8);
+    pdf.setTextColor(150);
+    pdf.text('Generated by BonesBudget - Your path to financial freedom', pageWidth / 2, 290, { align: 'center' });
+
+    // Save the PDF
+    pdf.save(`BonesBudget-Report-${new Date().toISOString().split('T')[0]}.pdf`);
+    showToast('PDF report downloaded!', 'success');
+  }, [debts, payments, totalDebt, totalExpenses, totalMinPayments, extraPayment, monthlySummary, debtFreeCalculation, showToast]);
 
   const expensesByCategory = useMemo(() => {
     const grouped: Record<string, number> = {};
@@ -924,6 +1168,7 @@ export default function DebtTracker() {
                 {activeTab === 'debts' && 'Manage and track all your debts'}
                 {activeTab === 'expenses' && 'Track your monthly spending'}
                 {activeTab === 'plan' && 'Your path to debt freedom'}
+                {activeTab === 'summary' && 'Your progress at a glance'}
                 {activeTab === 'insights' && 'AI-powered recommendations'}
               </p>
             </div>
@@ -1486,6 +1731,296 @@ export default function DebtTracker() {
                   </ResponsiveContainer>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Summary Tab */}
+          {activeTab === 'summary' && (
+            <div ref={summaryRef} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              {/* Export Button */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  onClick={exportToPDF}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '10px 20px',
+                    background: 'linear-gradient(90deg, #7c3aed, #8b5cf6)',
+                    borderRadius: '12px',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    border: 'none',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(124, 58, 237, 0.3)'
+                  }}
+                >
+                  <Download style={{ width: '16px', height: '16px' }} /> Export PDF Report
+                </button>
+              </div>
+
+              {/* Debt-Free Date Calculator */}
+              <div style={{ background: 'linear-gradient(90deg, rgba(16, 185, 129, 0.08), rgba(6, 182, 212, 0.05))', borderRadius: '16px', padding: '24px', border: '1px solid rgba(16, 185, 129, 0.15)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+                  <div style={{ width: '48px', height: '48px', borderRadius: '16px', background: 'linear-gradient(135deg, #10b981, #06b6d4)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)' }}>
+                    <Calendar style={{ width: '24px', height: '24px', color: '#ffffff' }} />
+                  </div>
+                  <div>
+                    <h3 style={{ fontWeight: '600', color: '#fafafa', margin: 0, fontSize: '18px' }}>Debt-Free Date Calculator</h3>
+                    <p style={{ fontSize: '14px', color: '#525252', margin: '4px 0 0 0' }}>Based on your current payment strategy</p>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+                  <div style={{ backgroundColor: 'rgba(10, 10, 10, 0.5)', borderRadius: '12px', padding: '20px', textAlign: 'center' }}>
+                    <p style={{ fontSize: '14px', color: '#525252', margin: '0 0 8px 0' }}>You'll be debt-free by</p>
+                    <p style={{ fontSize: '28px', fontWeight: '700', color: '#10b981', margin: 0 }}>
+                      {debtFreeCalculation.current.debtFreeDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                    </p>
+                    <p style={{ fontSize: '14px', color: '#737373', margin: '8px 0 0 0' }}>
+                      {debtFreeCalculation.current.years} years, {debtFreeCalculation.current.remainingMonths} months
+                    </p>
+                  </div>
+
+                  <div style={{ backgroundColor: 'rgba(10, 10, 10, 0.5)', borderRadius: '12px', padding: '20px', textAlign: 'center' }}>
+                    <p style={{ fontSize: '14px', color: '#525252', margin: '0 0 8px 0' }}>Estimated Interest to Pay</p>
+                    <p style={{ fontSize: '28px', fontWeight: '700', color: '#f97316', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                      ${debtFreeCalculation.current.totalInterestPaid.toLocaleString()}
+                    </p>
+                    <p style={{ fontSize: '14px', color: '#737373', margin: '8px 0 0 0' }}>
+                      Over {debtFreeCalculation.current.months} months
+                    </p>
+                  </div>
+
+                  <div style={{ backgroundColor: 'rgba(10, 10, 10, 0.5)', borderRadius: '12px', padding: '20px', textAlign: 'center' }}>
+                    <p style={{ fontSize: '14px', color: '#525252', margin: '0 0 8px 0' }}>Current Monthly Payment</p>
+                    <p style={{ fontSize: '28px', fontWeight: '700', color: '#fafafa', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                      ${(totalMinPayments + extraPayment).toLocaleString()}
+                    </p>
+                    <p style={{ fontSize: '14px', color: '#10b981', margin: '8px 0 0 0' }}>
+                      Includes ${extraPayment} extra
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* What-If Scenarios */}
+              <div style={{ backgroundColor: '#0a0a0a', borderRadius: '16px', padding: '24px', border: '1px solid #171717' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+                  <div style={{ width: '48px', height: '48px', borderRadius: '16px', backgroundColor: 'rgba(139, 92, 246, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Calculator style={{ width: '24px', height: '24px', color: '#8b5cf6' }} />
+                  </div>
+                  <div>
+                    <h3 style={{ fontWeight: '600', color: '#fafafa', margin: 0, fontSize: '18px' }}>What-If Scenarios</h3>
+                    <p style={{ fontSize: '14px', color: '#525252', margin: '4px 0 0 0' }}>See how extra payments affect your payoff</p>
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '24px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <span style={{ color: '#a3a3a3', fontSize: '14px' }}>Additional monthly payment:</span>
+                    <span style={{ color: '#8b5cf6', fontSize: '24px', fontWeight: '700', fontFamily: 'ui-monospace, monospace' }}>${whatIfExtra}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1000"
+                    step="50"
+                    value={whatIfExtra}
+                    onChange={(e) => setWhatIfExtra(parseInt(e.target.value))}
+                    style={{ width: '100%', height: '8px', backgroundColor: '#262626', borderRadius: '999px', appearance: 'none', cursor: 'pointer', accentColor: '#8b5cf6' }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#404040', marginTop: '8px' }}>
+                    <span>$0</span><span>$250</span><span>$500</span><span>$750</span><span>$1,000</span>
+                  </div>
+                </div>
+
+                {whatIfExtra > 0 && debtFreeCalculation.withExtra && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+                    <div style={{ background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.05))', borderRadius: '12px', padding: '20px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                        <TrendingDownIcon style={{ width: '20px', height: '20px', color: '#10b981' }} />
+                        <span style={{ color: '#525252', fontSize: '14px' }}>New Debt-Free Date</span>
+                      </div>
+                      <p style={{ fontSize: '24px', fontWeight: '700', color: '#10b981', margin: 0 }}>
+                        {debtFreeCalculation.withExtra.debtFreeDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                      </p>
+                      <p style={{ fontSize: '14px', color: '#737373', margin: '8px 0 0 0' }}>
+                        {debtFreeCalculation.withExtra.years}y {debtFreeCalculation.withExtra.remainingMonths}m
+                      </p>
+                    </div>
+
+                    <div style={{ background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(6, 182, 212, 0.05))', borderRadius: '12px', padding: '20px', border: '1px solid rgba(6, 182, 212, 0.2)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                        <Calendar style={{ width: '20px', height: '20px', color: '#06b6d4' }} />
+                        <span style={{ color: '#525252', fontSize: '14px' }}>Time Saved</span>
+                      </div>
+                      <p style={{ fontSize: '24px', fontWeight: '700', color: '#06b6d4', margin: 0 }}>
+                        {Math.floor(debtFreeCalculation.monthsSaved / 12)}y {debtFreeCalculation.monthsSaved % 12}m
+                      </p>
+                      <p style={{ fontSize: '14px', color: '#737373', margin: '8px 0 0 0' }}>
+                        {debtFreeCalculation.monthsSaved} months faster
+                      </p>
+                    </div>
+
+                    <div style={{ background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.05))', borderRadius: '12px', padding: '20px', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                        <DollarSign style={{ width: '20px', height: '20px', color: '#f59e0b' }} />
+                        <span style={{ color: '#525252', fontSize: '14px' }}>Interest Saved</span>
+                      </div>
+                      <p style={{ fontSize: '24px', fontWeight: '700', color: '#f59e0b', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                        ${debtFreeCalculation.interestSaved.toLocaleString()}
+                      </p>
+                      <p style={{ fontSize: '14px', color: '#737373', margin: '8px 0 0 0' }}>
+                        That stays in your pocket
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {whatIfExtra === 0 && (
+                  <div style={{ textAlign: 'center', padding: '32px', color: '#525252' }}>
+                    <Calculator style={{ width: '48px', height: '48px', marginBottom: '16px', opacity: 0.5 }} />
+                    <p style={{ margin: 0 }}>Drag the slider above to see how extra payments would accelerate your debt payoff</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Monthly Summary */}
+              <div style={{ backgroundColor: '#0a0a0a', borderRadius: '16px', padding: '24px', border: '1px solid #171717' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ width: '48px', height: '48px', borderRadius: '16px', backgroundColor: 'rgba(59, 130, 246, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <FileText style={{ width: '24px', height: '24px', color: '#3b82f6' }} />
+                    </div>
+                    <div>
+                      <h3 style={{ fontWeight: '600', color: '#fafafa', margin: 0, fontSize: '18px' }}>Monthly Summary</h3>
+                      <p style={{ fontSize: '14px', color: '#525252', margin: '4px 0 0 0' }}>{monthlySummary.monthName}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+                  <div style={{ backgroundColor: '#141414', borderRadius: '12px', padding: '16px', textAlign: 'center' }}>
+                    <p style={{ fontSize: '12px', color: '#525252', margin: '0 0 8px 0' }}>Paid This Month</p>
+                    <p style={{ fontSize: '24px', fontWeight: '700', color: '#10b981', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                      ${monthlySummary.totalPaidThisMonth.toLocaleString()}
+                    </p>
+                    <p style={{ fontSize: '12px', color: '#525252', margin: '4px 0 0 0' }}>{monthlySummary.paymentsCount} payments</p>
+                  </div>
+
+                  <div style={{ backgroundColor: '#141414', borderRadius: '12px', padding: '16px', textAlign: 'center' }}>
+                    <p style={{ fontSize: '12px', color: '#525252', margin: '0 0 8px 0' }}>All-Time Paid</p>
+                    <p style={{ fontSize: '24px', fontWeight: '700', color: '#06b6d4', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                      ${monthlySummary.totalPaidAllTime.toLocaleString()}
+                    </p>
+                    <p style={{ fontSize: '12px', color: '#525252', margin: '4px 0 0 0' }}>{payments.length} total payments</p>
+                  </div>
+
+                  <div style={{ backgroundColor: '#141414', borderRadius: '12px', padding: '16px', textAlign: 'center' }}>
+                    <p style={{ fontSize: '12px', color: '#525252', margin: '0 0 8px 0' }}>Progress</p>
+                    <p style={{ fontSize: '24px', fontWeight: '700', color: '#8b5cf6', margin: 0 }}>
+                      {monthlySummary.progressPercent}%
+                    </p>
+                    <p style={{ fontSize: '12px', color: '#525252', margin: '4px 0 0 0' }}>debt eliminated</p>
+                  </div>
+
+                  <div style={{ backgroundColor: '#141414', borderRadius: '12px', padding: '16px', textAlign: 'center' }}>
+                    <p style={{ fontSize: '12px', color: '#525252', margin: '0 0 8px 0' }}>Monthly Interest</p>
+                    <p style={{ fontSize: '24px', fontWeight: '700', color: '#f97316', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                      ${monthlySummary.thisMonthInterest.toLocaleString()}
+                    </p>
+                    <p style={{ fontSize: '12px', color: '#525252', margin: '4px 0 0 0' }}>going to interest</p>
+                  </div>
+                </div>
+
+                {/* Progress Bar */}
+                <div style={{ marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span style={{ color: '#525252', fontSize: '14px' }}>Overall Progress</span>
+                    <span style={{ color: '#10b981', fontSize: '14px', fontWeight: '600' }}>{monthlySummary.progressPercent}%</span>
+                  </div>
+                  <div style={{ height: '12px', backgroundColor: '#171717', borderRadius: '999px', overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%',
+                      width: `${Math.max(2, monthlySummary.progressPercent)}%`,
+                      background: 'linear-gradient(90deg, #10b981, #06b6d4)',
+                      borderRadius: '999px',
+                      transition: 'width 0.5s ease'
+                    }} />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '12px', color: '#404040' }}>
+                    <span>${monthlySummary.totalPaidAllTime.toLocaleString()} paid</span>
+                    <span>${totalDebt.toLocaleString()} remaining</span>
+                  </div>
+                </div>
+
+                {/* Quick Stats */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', backgroundColor: '#141414', borderRadius: '12px', padding: '16px' }}>
+                    <div style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: 'rgba(16, 185, 129, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <TrendingUp style={{ width: '20px', height: '20px', color: '#10b981' }} />
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '12px', color: '#525252', margin: 0 }}>Avg Payment</p>
+                      <p style={{ fontSize: '18px', fontWeight: '600', color: '#fafafa', margin: '4px 0 0 0', fontFamily: 'ui-monospace, monospace' }}>
+                        ${monthlySummary.avgPayment.toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', backgroundColor: '#141414', borderRadius: '12px', padding: '16px' }}>
+                    <div style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: 'rgba(245, 158, 11, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Target style={{ width: '20px', height: '20px', color: '#f59e0b' }} />
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '12px', color: '#525252', margin: 0 }}>Best Month</p>
+                      <p style={{ fontSize: '18px', fontWeight: '600', color: '#fafafa', margin: '4px 0 0 0', fontFamily: 'ui-monospace, monospace' }}>
+                        ${monthlySummary.bestMonthAmount.toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', backgroundColor: '#141414', borderRadius: '12px', padding: '16px' }}>
+                    <div style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: 'rgba(6, 182, 212, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Calendar style={{ width: '20px', height: '20px', color: '#06b6d4' }} />
+                    </div>
+                    <div>
+                      <p style={{ fontSize: '12px', color: '#525252', margin: 0 }}>Time to Freedom</p>
+                      <p style={{ fontSize: '18px', fontWeight: '600', color: '#fafafa', margin: '4px 0 0 0' }}>
+                        {debtFreeCalculation.current.years}y {debtFreeCalculation.current.remainingMonths}m
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* This Month's Payments */}
+              {monthlySummary.thisMonthPayments.length > 0 && (
+                <div style={{ backgroundColor: '#0a0a0a', borderRadius: '16px', padding: '24px', border: '1px solid #171717' }}>
+                  <h3 style={{ fontWeight: '600', color: '#fafafa', margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <History style={{ width: '20px', height: '20px', color: '#10b981' }} />
+                    This Month's Payments
+                  </h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {monthlySummary.thisMonthPayments.map(payment => (
+                      <div key={payment.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', backgroundColor: '#141414', borderRadius: '10px' }}>
+                        <div>
+                          <p style={{ fontWeight: '500', color: '#fafafa', margin: 0 }}>{payment.debtName}</p>
+                          <p style={{ fontSize: '12px', color: '#525252', margin: '4px 0 0 0' }}>
+                            {new Date(payment.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            {payment.note && ` • ${payment.note}`}
+                          </p>
+                        </div>
+                        <p style={{ fontWeight: '600', color: '#10b981', margin: 0, fontFamily: 'ui-monospace, monospace' }}>
+                          ${payment.amount.toLocaleString()}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
