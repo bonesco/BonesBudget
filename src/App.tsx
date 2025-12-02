@@ -459,11 +459,22 @@ export default function DebtTracker() {
   // Calculate debt-free date and total interest
   const debtFreeCalculation = useMemo(() => {
     const calculatePayoff = (additionalExtra: number = 0) => {
-      const debtsCopy = debts.map(d => ({ ...d, currentBalance: d.balance }));
-      const sortedDebts = [...debtsCopy].sort((a, b) => b.rate - a.rate); // Avalanche method
+      // Handle edge case of no debts
+      if (!debts || debts.length === 0) {
+        return {
+          months: 0,
+          debtFreeDate: new Date(),
+          totalInterestPaid: 0,
+          years: 0,
+          remainingMonths: 0
+        };
+      }
+
+      const debtsCopy = debts.map(d => ({ ...d, currentBalance: d.balance || 0 }));
+      const sortedDebts = [...debtsCopy].sort((a, b) => (b.rate || 0) - (a.rate || 0)); // Avalanche method
       let months = 0;
       let totalInterestPaid = 0;
-      const monthlyExtra = extraPayment + additionalExtra;
+      const monthlyExtra = (extraPayment || 0) + (additionalExtra || 0);
 
       while (sortedDebts.some(d => d.currentBalance > 0) && months < 600) {
         months++;
@@ -521,36 +532,40 @@ export default function DebtTracker() {
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
 
-    // Filter payments from current month
-    const thisMonthPayments = payments.filter(p => {
+    // Filter payments from current month (with safety check)
+    const safePayments = payments || [];
+    const thisMonthPayments = safePayments.filter(p => {
+      if (!p || !p.date) return false;
       const paymentDate = new Date(p.date);
       return paymentDate.getMonth() === currentMonth && paymentDate.getFullYear() === currentYear;
     });
 
-    const totalPaidThisMonth = thisMonthPayments.reduce((sum, p) => sum + p.amount, 0);
+    const totalPaidThisMonth = thisMonthPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
     const paymentsCount = thisMonthPayments.length;
 
     // Calculate total paid all time
-    const totalPaidAllTime = payments.reduce((sum, p) => sum + p.amount, 0);
+    const totalPaidAllTime = safePayments.reduce((sum, p) => sum + (p?.amount || 0), 0);
 
-    // Calculate original total debt
-    const originalTotalDebt = debts.reduce((sum, d) => sum + d.originalBalance, 0);
+    // Calculate original total debt (with safety check)
+    const safeDebts = debts || [];
+    const originalTotalDebt = safeDebts.reduce((sum, d) => sum + (d?.originalBalance || 0), 0);
 
     // Calculate progress percentage
-    const progressPercent = originalTotalDebt > 0 ? Math.round((1 - totalDebt / originalTotalDebt) * 100) : 0;
+    const progressPercent = originalTotalDebt > 0 ? Math.round((1 - (totalDebt || 0) / originalTotalDebt) * 100) : 0;
 
     // Calculate this month's interest cost
-    const thisMonthInterest = debts.reduce((sum, d) => sum + (d.balance * (d.rate / 100) / 12), 0);
+    const thisMonthInterest = safeDebts.reduce((sum, d) => sum + ((d?.balance || 0) * ((d?.rate || 0) / 100) / 12), 0);
 
     // Calculate average payment
-    const avgPayment = payments.length > 0 ? totalPaidAllTime / payments.length : 0;
+    const avgPayment = safePayments.length > 0 ? totalPaidAllTime / safePayments.length : 0;
 
     // Best month calculation
     const paymentsByMonth: Record<string, number> = {};
-    payments.forEach(p => {
+    safePayments.forEach(p => {
+      if (!p || !p.date) return;
       const date = new Date(p.date);
       const key = `${date.getFullYear()}-${date.getMonth()}`;
-      paymentsByMonth[key] = (paymentsByMonth[key] || 0) + p.amount;
+      paymentsByMonth[key] = (paymentsByMonth[key] || 0) + (p.amount || 0);
     });
     const bestMonth = Object.entries(paymentsByMonth).sort((a, b) => b[1] - a[1])[0];
 
